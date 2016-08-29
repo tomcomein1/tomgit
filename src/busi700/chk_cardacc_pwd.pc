@@ -1,0 +1,387 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <time.h>
+#include "pbconstval.h"
+#include "pbstructdef.h"
+#ifdef ORACLE_DATABASE
+EXEC SQL include "pbranchdb.h";
+#else
+#include "pbranchdb.h"
+#endif
+#include "pberrlog.h"
+#include "pbglbvardef.h"
+#include "pbbasefunc.h"
+
+#include "zpqds.h"  /*ZPQDS查询用头文件*/
+long GetCertNoFromCore();
+long 
+chkCardAccPwdBef()
+{
+	char cardAcctNb[32+1];
+	char pwd[128+1];
+	char pwdtmp[128+1];
+	char pwdbuf[128+1];
+	char pwdTyp[2+1];
+	char chkCertFlg[2+1];
+	char chkFlag[10+1];
+	/**add by sqf begin 20110614**/
+	char cardAcctFlg[2+1];
+	char certTyp[4+1];
+	char certNb[32+1];
+	char custNm[128+1];
+	char errmsg[128+1];
+	/**add by sqf end 20110614**/
+	int ret = 0;
+	long errcode = 0;
+
+	memset( cardAcctNb, 0x00, sizeof( cardAcctNb ) );
+	memset( pwdTyp, 0x00, sizeof( pwdTyp ) );
+	memset( pwd, 0x00, sizeof( pwd ) );
+	memset( pwdtmp, 0x00, sizeof( pwdtmp ) );
+	memset( pwdbuf, 0x00, sizeof( pwdbuf ) );
+	memset( chkCertFlg, 0x00, sizeof( chkCertFlg ) );
+	memset( chkFlag, 0x00, sizeof( chkFlag ) );
+	/**add by sqf begin 20110614**/
+	memset( cardAcctFlg, 0x00, sizeof( cardAcctFlg ) );
+	memset( certTyp, 0x00, sizeof( certTyp ) );
+	memset( certNb, 0x00, sizeof( certNb ) );
+	memset( custNm, 0x00, sizeof( custNm ) );
+	memset( errmsg, 0x00, sizeof( errmsg ) );
+	/**add by sqf end 20110614**/
+
+    strcpy( chkFlag, "0000000000");
+
+	GetPoolDataByName( "BUSIIB", "cardAcctNb", 0, 0, cardAcctNb, 0 );
+	GetPoolDataByName( "BUSIIB", "pwdTyp", 0, 0, pwdTyp, 0 );
+	GetPoolDataByName( "BUSIIB", "pwd", 0, 0, pwd, 0 );
+	GetPoolDataByName( "BUSIIB", "chkCertFlg", 0, 0, chkCertFlg, 0 );
+
+	/**add by sqf begin 20110614**/
+	GetPoolDataByName( "BUSIIB", "cardAcctFlg", 0, 0, cardAcctFlg, 0 );
+	GetPoolDataByName( "BUSIIB", "certTyp", 0, 0, certTyp, 0 );
+	GetPoolDataByName( "BUSIIB", "certNb", 0, 0, certNb, 0 );
+	GetPoolDataByName( "BUSIIB", "custNm", 0, 0, custNm, 0 );
+
+	rtrim( cardAcctNb );
+	rtrim( pwdTyp );
+	rtrim( pwd );
+	rtrim( chkCertFlg );
+	rtrim( certTyp );
+	rtrim( certNb );
+	rtrim( custNm );
+
+	if( cardAcctFlg[0] == '1' )
+	{
+		if( IsCardNo(cardAcctNb) != 0 )
+		{
+			errcode = 99999;
+			strcpy( errmsg, "卡账号标志为卡号，输入非卡号!" );
+			PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode,0 );
+			PutPoolDataByName("ABSHEAD","_error_code", 0, 0, errmsg,0);
+			return ( -1 );
+		}
+	}
+
+	/**add by sqf end 20110614**/
+	/* begin delete by yuwenxue 20131008 *
+	 * 将原始密文传入网银服务,重新解密,计算2种密文(12 or 16位)**
+	ret = UnionDecryptPin( (char *)pwd, (char *)cardAcctNb, (char *)pwdtmp );
+	WriteLog( APP_LVL, "pwd[%s]", pwd );
+	WriteLog( APP_LVL, "cardAcctNb[%s]", cardAcctNb );
+	WriteLog( APP_LVL, "pwdtmp[%s]", pwdtmp );
+
+	if( ret != 0 )
+	{
+		WriteLog( ERR_LVL, "解密错!" );
+		errcode = 99999;
+		strcpy( errmsg, "解密错!" );
+		PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode,0 );
+		PutPoolDataByName("ABSHEAD","_error_code", 0, 0, errmsg,0);
+		return ( -1 );
+	}
+	* modify by lg 20130722 begin *
+	if( SC6000_3Des(1, (char *)pwdtmp, (char *)pwdbuf ) )
+	*
+	if( SC6000_ATM_3Des(1, (char *)pwdtmp, (char *)pwdbuf ) )
+	* modify by lg 20130722 end *
+	{
+		WriteLog( ERR_LVL, "加密错!" );
+		errcode = 99999;
+		strcpy( errmsg, "加密错!" );
+		PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode,0 );
+		PutPoolDataByName("ABSHEAD","_error_code", 0, 0, errmsg,0);
+		return ( -1 );
+	}
+	* end delete by yuwenxue 20131008 */
+
+	if( pwdTyp[0] == '2' )
+	{
+		/* begin update by yuwenxue 20131008 *
+		PutPoolDataByName("BUSIIB","pwd",0,0,pwdbuf,0);
+		*/
+		PutPoolDataByName("BUSIIB","pwd",0,0,pwd,0);
+		/* end update by yuwenxue 20131008 */
+		chkFlag[2] = '1';
+	}
+	else if( pwdTyp[0] == '1' )
+	{
+		/* begin update by yuwenxue 20131008 *
+		PutPoolDataByName("BUSIIB","pwd",0,0,pwdbuf,0);
+		*/
+		PutPoolDataByName("BUSIIB","pwd",0,0,pwd,0);
+		/* end update by yuwenxue 20131008 */
+		chkFlag[2] = '2';
+	}
+	else
+	{
+		PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, "99999",0);
+		WriteLog( ERR_LVL, "密码类型错!" );
+		errcode = 99999;
+		strcpy( errmsg, "密码类型错!" );
+		PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode,0 );
+		PutPoolDataByName("ABSHEAD","_error_code", 0, 0, errmsg,0);
+		return ( -1 );
+	}
+
+	/**户名验证**/
+	if( strlen( custNm ) != 0 )
+	{
+		chkFlag[0] = '1';
+		/**查询交易验证户名**/
+		chkFlag[3] = '3';
+	}
+
+	/** 证件验证标志  **
+	if( chkCertFlg[0] == '1' )
+	{
+		chkFlag[1] = '1';
+	}
+	**/
+
+	if( IsCardNo(cardAcctNb) == 0)
+	{
+		/**modify by sqf for 检查卡对应户主帐的状态 begin**
+	    chkFlag[6] = '2';
+		**/
+	    chkFlag[6] = '3';
+		/**modify by sqf for 检查卡对应户主帐的状态 end**/
+	}
+	else
+	{
+	    chkFlag[6] = '1';
+	}
+
+	WriteLog( APP_LVL, "CHKFLAG[%s]", chkFlag );
+	PutPoolDataByName("BUSIIB","backup1", 0, 0, chkFlag, 0);
+
+	return (0);
+}
+long 
+WY_ChkCertNo()
+{
+	char acc[32+1];
+	char cstm_no[32+1];
+	char chkCertFlg[2+1];
+	char cardAcctFlg[2+1];
+	char certTyp[4+1];
+	char certNb[32+1];
+	char paperno[19+1];
+	char cmppaperno[19+1];
+	char errmsg[128+1];
+	int ret = 0;
+	long errcode = 0;
+
+	memset( acc, 0x00, sizeof( acc ) );
+	memset( cstm_no, 0x00, sizeof( cstm_no ) );
+	memset( chkCertFlg, 0x00, sizeof( chkCertFlg ) );
+	memset( cardAcctFlg, 0x00, sizeof( cardAcctFlg ) );
+	memset( certTyp, 0x00, sizeof( certTyp ) );
+	memset( certNb, 0x00, sizeof( certNb ) );
+	memset( paperno, 0x00, sizeof( paperno ) );
+	memset( cmppaperno, 0x00, sizeof( cmppaperno ) );
+	memset( errmsg, 0x00, sizeof( errmsg ) );
+
+	GetPoolDataByName( "BUSIIB", "cardAcctNb", 0, 0, acc, 0 );
+	GetPoolDataByName( "BUSIIB", "chkCertFlg", 0, 0, chkCertFlg, 0 );
+	GetPoolDataByName( "BUSIIB", "cardAcctFlg", 0, 0, cardAcctFlg, 0 );
+	GetPoolDataByName( "PAGTBUF", "papertype", 0, 0, certTyp, 0 );
+	GetPoolDataByName( "BUSIIB", "certNb", 0, 0, certNb, 0 );
+
+	rtrim( acc );
+	rtrim( chkCertFlg );
+	rtrim( cardAcctFlg );
+	rtrim( certTyp );
+	rtrim( certNb );
+	sprintf( cmppaperno, "%s%s", certTyp, certNb );
+	WriteLog( APP_LVL, "cmppaperno[%s]", cmppaperno );
+	WriteLog( APP_LVL, "acc[%s]", acc );
+
+	if( chkCertFlg[0] != '1' )
+	{
+		return ( 0 );
+	}
+
+	/**取客户号**/
+	if( cardAcctFlg[0] == '1' )
+	{
+		GetPoolDataByName( "BUSIIB2", "cardcustID", 0, 0, cstm_no, 0 );
+	}
+	else
+	{
+		switch( acc[6] )
+		{
+		case '1':
+			GetPoolDataByName( "BUSIIB2", "CdmcustID", 0, 0, cstm_no, 0 );
+			break;
+		case '2':
+			GetPoolDataByName( "BUSIIB2", "sdmcustID", 0, 0, cstm_no, 0 );
+			break;
+		case '3':
+			GetPoolDataByName( "BUSIIB2", "FixcustID", 0, 0, cstm_no, 0 );
+			break;
+		default:
+			errcode = 99999;
+			strcpy( errmsg, "账户类型未知!" );
+			PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode, 0 );
+			PutPoolDataByName("ABSHEAD","_error_code", 0, 0, errmsg, 0 );
+			return ( -1 );
+		}
+	}
+	rtrim( cstm_no );
+	WriteLog( APP_LVL, "cstm_no[%s]", cstm_no );
+	ret = GetCertNoFromCore( cstm_no, paperno );
+	if( ret != 0 )
+	{
+		WriteLog( ERR_LVL, "获取证件号失败!" );
+		errcode = 99999;
+		strcpy( errmsg, "获取证件号失败!" );
+		PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode, 0 );
+		PutPoolDataByName("ABSHEAD","_error_code", 0, 0, errmsg, 0 );
+		return ( -1 );
+	}
+	rtrim(paperno);
+	WriteLog( APP_LVL, "paperno[%s]", paperno );
+	WriteLog( APP_LVL, "cmppaperno[%s]", cmppaperno );
+	if( strncmp( paperno, cmppaperno, 19 ) != 0 )
+	{
+		WriteLog( ERR_LVL, "证件检查不符!" );
+		errcode = 99999;
+		strcpy( errmsg, "证件检查不符!" );
+		PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode, 0 );
+		PutPoolDataByName("ABSHEAD","_error_code", 0, 0, errmsg, 0 );
+		return ( -1 );
+	}
+
+	return ( 0 );
+}
+
+long 
+GetCertNoFromCore( cstm_no, paperno )
+char *cstm_no;
+char *paperno;
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+	char pqqry[512];
+	char paper_no[19+1];
+	EXEC SQL END DECLARE SECTION;
+	int ret = 0;
+	
+	char crm_flag[1+1];                             /* CRM状态标志 */
+	char crm_msg[10240+1];                  /* CRM返回业务数据 */
+	struct tag_prsn_info st_prsn_info;
+	struct tag_corp_info st_corp_info;
+    memset(&st_prsn_info, 0x00, sizeof (struct tag_prsn_info));
+    memset(&st_corp_info, 0x00, sizeof (struct tag_corp_info));
+    memset(crm_flag, 0x00, sizeof (crm_flag));
+    memset(crm_msg, 0x00, sizeof (crm_msg));
+	memset( paper_no, 0x00, sizeof( paper_no ) );
+
+	WriteLog( APP_LVL, "cstm_no[%s]", cstm_no );
+	
+	/* Modify For SC6000z-ZPQDS Begin By RongQibo 2013/07/19 */
+	/*CRM状态检查*/
+	ret = IsCRMAvail("9996", crm_flag);
+	if(ret != 0)
+	{
+		WriteLog ( ERR_LVL, "查询CRM状态失败");
+		return (  -1);
+	}
+
+    WriteLog(DEBUG_LVL0,"cstm_no[%s]\n", cstm_no );
+    WriteLog(DEBUG_LVL0,"crm_flag[%s]\n", crm_flag);
+    
+	if( cstm_no[4] == '1' )
+	{
+		if(crm_flag[0] == '1')
+	    {
+	        /*CRM查询*/
+		    ret = GetCstmInfo("1", cstm_no, "", "", crm_msg);
+		    if(ret != 0)
+	        {
+		        WriteLog ( ERR_LVL, "CRM查询失败 [%d]", ret);
+		        return (-1);
+	        }
+
+	        /*CRM查询结果处理*/
+	        memset(&st_corp_info, 0, sizeof(struct tag_corp_info));
+	        ret = Move(crm_msg, 0, &st_corp_info, 1);
+	        if(ret != 0)
+	        {
+		        WriteLog ( ERR_LVL, "CRM查询结果处理失败[%d]", ret);
+		        return (-1);
+	        }
+	        sprintf(paper_no, "%s%s", st_corp_info.paper_type, st_corp_info.paper_no);
+	    }
+	    else
+	    {
+		sprintf( pqqry, "select paper_no from t_cstm_corp_base where cstm_no = '%s'", cstm_no ); 
+                WriteLog( APP_LVL, "pqqry[%s]", pqqry );
+	        ret = PqQry( "9996", paper_no, pqqry );
+	        if( ret != 0 )
+	        {
+		    WriteLog( ERR_LVL, "PqQry Err!" );
+		    return ( -1 );
+	        }
+            }
+	}
+	else
+	{
+		if(crm_flag[0] == '1')
+	    {
+	        /*CRM查询*/
+		    ret = GetCstmInfo("0", cstm_no, "", "", crm_msg);
+		    if(ret != 0)
+	        {
+		        WriteLog ( ERR_LVL, "CRM查询失败 [%d]", ret);
+		        return (-1);
+	        }
+
+	        /*CRM查询结果处理*/
+	        memset(&st_prsn_info, 0, sizeof(struct tag_prsn_info));
+	        ret = Move(crm_msg, 0, &st_prsn_info, 0);
+	        if(ret != 0)
+	        {
+		        WriteLog ( ERR_LVL, "CRM查询结果处理失败[%d]", ret);
+		        return (-1);
+	        }
+	        sprintf(paper_no, "%s%s", st_prsn_info.paper_type, st_prsn_info.paper_no);
+	    }
+	    else
+	    {
+		sprintf( pqqry, "select paper_no from t_cstm_prsn_base where cstm_no = '%s'", cstm_no ); 
+                WriteLog( APP_LVL, "pqqry[%s]", pqqry );
+	        ret = PqQry( "9996", paper_no, pqqry );
+	        if( ret != 0 )
+	        {
+		    WriteLog( ERR_LVL, "PqQry Err!" );
+		    return ( -1 );
+	        }
+	    }
+	}
+	
+	WriteLog( APP_LVL, "paper_no[%s]", paper_no );
+	memcpy( paperno, paper_no, 19 );
+
+	return ( 0 );
+}

@@ -1,0 +1,875 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <errno.h>
+#include <string.h>
+#include <unistd.h>
+#include <time.h>
+
+#include "pbconstval.h"
+#include "pbstructdef.h"
+#ifdef ORACLE_DATABASE
+EXEC SQL include "pbranchdb.h";
+#else
+#include "pbranchdb.h"
+#endif
+#include "pbappdb.h"
+#include "pberrlog.h"
+#include "pbglbvardef.h"
+#include "pbbasefunc.h"
+#include "pbvarmacro.h"
+
+#include "pbdb.h"
+#include "fml32.h"
+#include "atmi.h"
+#include "pbsrv.h"
+
+struct prdnoinfo{
+	double bgn_amt;
+	double bgn_m_amt;
+};
+
+long WY_PieCon();
+long NetBank_Pub_InsertPbTlrLog();
+long AccQryPub5711();
+long AccQryPub5001();
+long GetPrdnoFromCore();
+long WYGetOutCardNoByAcc();
+/*
+double atof();
+*/
+
+long 
+WY_PieCon()
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+		struct s_pb_tlrlog pb_tlrlog;
+		char pbdate[8+1];
+		char prd_no[4+1];
+		char curr_type[2+1];
+		char acctTyp[8+1];
+		char savePeriod[4+1];
+	EXEC SQL END DECLARE SECTION;
+	char tx_code[40+1];
+	char old_tx_code[40+1];
+	char summ_no[12+1];
+	char summ_note[60+1];
+	char in_acc[32+1];
+	char out_acc[32+1];
+	char hostseqno[10+1];
+	char err_msg[256+1];
+	char s_amt[16+1];
+	char in_card_no[32+1];
+	char out_card_no[32+1];
+	char in_prd_no[4+1];
+	char cmp_prd_no[4+1];
+	char cust_no[14+1];
+	char cust_name[128+1];
+	char paper_type[1+1];
+	char paper_no[19+1];
+	char PaperNo[20+1];
+	char inst_no[4+1];
+	char fixAcct[32+1];
+
+	char curAcctBal[16+1];
+	char curAcctAvlBal[16+1];
+	char fixBal[16+1];
+	char fixAvlBal[16+1];
+	char hostSeqNb[16+1];
+	char sqlstr[500+1];
+
+	/*add by wangxiaorui20140311*/
+	double f_curAcctBal=0;
+	double f_curAcctAvlBal=0;
+	double f_fixBal=0;
+	double f_fixAvlBal=0;
+	double drate=0;
+	char bngDt[10+1];
+	char dueDt[10+1];
+	char rate[ 16+1];
+	/*end add */
+
+	long app_err_no = 0;
+	long errcode = 0;
+	long hoststat = -1;
+	long ret = 0;
+
+	long summno = 0;
+	long tmpsavePeriod = 0;
+	double amt = 0.00;
+	long SubAcc = 0;
+
+	memset( bngDt, 0x00, sizeof( bngDt ) );
+	memset( dueDt, 0x00, sizeof( dueDt ) );
+	memset( rate, 0x00, sizeof( rate ) );
+	memset( &pb_tlrlog, 0x00, sizeof( pb_tlrlog ) );
+	memset( pbdate, 0x00, sizeof( pbdate ) );
+	memset( tx_code, 0x00, sizeof( tx_code ) );
+	memset( old_tx_code, 0x00, sizeof( old_tx_code ) );
+	memset( curr_type, 0x00, sizeof( curr_type ) );
+	memset( summ_no, 0x00, sizeof( summ_no ) );
+	memset( summ_note, 0x00, sizeof( summ_note ) );
+	memset( in_acc, 0x00, sizeof( in_acc ) );
+	memset( out_acc, 0x00, sizeof( out_acc ) );
+	memset( hostseqno, 0x00, sizeof( hostseqno ) );
+	memset( err_msg, 0x00, sizeof( err_msg ) );
+	memset( s_amt, 0x00, sizeof( s_amt ) );
+	memset( acctTyp, 0x00, sizeof( acctTyp ) );
+	memset( savePeriod, 0x00, sizeof( savePeriod ) );
+	memset( in_card_no, 0x00, sizeof( in_card_no ) );
+	memset( out_card_no, 0x00, sizeof( out_card_no ) );
+	memset( in_prd_no, 0x00, sizeof( in_prd_no ) );
+	memset( cmp_prd_no, 0x00, sizeof( cmp_prd_no ) );
+	memset( prd_no, 0x00, sizeof( prd_no ) );
+	memset( cust_no, 0x00, sizeof( cust_no ) );
+	memset( cust_name, 0x00, sizeof( cust_name ) );
+	memset( paper_type, 0x00, sizeof( paper_type ) );
+	memset( paper_no, 0x00, sizeof( paper_no ) );
+	memset( PaperNo, 0x00, sizeof( PaperNo ) );
+	memset( inst_no, 0x00, sizeof( inst_no ) );
+	memset( fixAcct, 0x00, sizeof( fixAcct ) );
+
+	memset( curAcctBal, 0x00, sizeof( curAcctBal ) );
+	memset( curAcctAvlBal, 0x00, sizeof( curAcctAvlBal ) );
+	memset( fixBal, 0x00, sizeof( fixBal ) );
+	memset( fixAvlBal, 0x00, sizeof( fixAvlBal ) );
+	memset( hostSeqNb, 0x00, sizeof( hostSeqNb ) );
+
+	WriteLog( APP_LVL, "===零整续存===" );
+
+	GetPoolDataByName( "BUSIIB", "payCardAcctNb", 0, 0, out_acc, 0 );
+	rtrim( out_acc );
+	GetPoolDataByName( "BUSIIB", "rcvAcct", 0, 0, in_acc, 0 );
+	rtrim( in_acc );
+	GetPoolDataByName( "BUSIIB", "acctTyp", 0, 0, acctTyp, 0 );
+	GetPoolDataByName( "BUSIIB", "savePeriod", 0, 0, savePeriod, 0 );
+	GetPoolDataByName( "BUSIIB", "billNb", 0, 0, fixAcct, 0 );
+	rtrim( fixAcct );
+	
+	WriteLog( APP_LVL, "out_acc %s", out_acc);
+	WriteLog( APP_LVL, "in_acc %s", in_acc);
+	WriteLog( APP_LVL, "fixAcct %s", fixAcct );
+	WriteLog( APP_LVL, "acctTyp %s", acctTyp);
+	WriteLog( APP_LVL, "savePeriod %s", savePeriod);
+
+	if( savePeriod[0]!='Y' )
+	{
+		tmpsavePeriod=atof( savePeriod );
+		tmpsavePeriod=tmpsavePeriod/12;
+		WriteLog( APP_LVL, "tmpsavePeriod %ld", tmpsavePeriod );
+		memset( savePeriod, 0x00, sizeof( savePeriod ));
+		sprintf( savePeriod, "Y%ld", tmpsavePeriod );
+	}
+	WriteLog( APP_LVL, "savePeriod %s", savePeriod );
+	
+	
+	/**检查转出账号**/
+	if( strlen( out_acc ) == 0 )
+	{
+		WriteLog( ERR_LVL, "转出账号为空" );
+		errcode = 99999;
+		strcpy( err_msg, "转出账号为空!");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		return ( -1 );
+	}
+	ret = IsCardNo( out_acc );
+	if( ret != 0 )
+	{
+		WriteLog( ERR_LVL, "转出账号[%s]非卡号", out_acc );
+		if( out_acc[6] != '1' )
+		{
+			errcode = 99999;
+			strcpy( err_msg, "转出账号不是活期账户" );
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			return ( -1 );
+		}
+		/**不是卡号需取卡号，核心记账必须传卡号**/
+		ret = WYGetOutCardNoByAcc( out_acc );
+		if( ret != 0 )
+		{
+			errcode = 99999;
+			strcpy( err_msg, "根据活期账户取对应卡号失败!" );
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			return ( -1 );
+		}
+		GetPoolDataByName( "BUSIIB", "acct", 0, 0, out_card_no, 0 );
+		rtrim( out_card_no );
+		WriteLog( APP_LVL, "out_card_no[%s]", out_card_no );
+		if( strlen( out_card_no ) == 0 )
+		{
+			errcode = 99999;
+			strcpy( err_msg, "转出卡号为空!" );
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			return ( -1 );
+		}
+	}
+	else
+	{
+		strcpy( out_card_no, out_acc );
+		WriteLog( APP_LVL, "out_card_no[%s]", out_card_no );
+	}
+	/**调用5711查询转出卡的活期账户**/
+	ret = AccQryPub5711( out_acc );
+	if( ret )
+	{
+		WriteLog( ERR_LVL, "调用5711查询转出账号[%s]信息失败", out_acc );
+		errcode = 99999;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		return ( -1 );
+	}
+	memset( out_acc, 0x00, sizeof( out_acc ) );
+	GetPoolDataByName ( "CBS", "Track2Data", 0, 0, out_acc, 0);
+	GetPoolDataByName ( "CBS", "CustNo", 0, 0, cust_no, 0);
+	GetPoolDataByName ( "CBS", "AcctStat", 0, 0, paper_no, 0);
+	GetPoolDataByName ( "CBS", "distflag", 0, 0, paper_type, 0);
+	GetPoolDataByName ( "CBS", "OpenInstNo", 0, 0, inst_no, 0);
+
+
+	strcpy( pb_tlrlog.tran_inst, inst_no );
+	memset(cust_name,0x00,sizeof(cust_name));
+	memset(sqlstr,0x00,sizeof(sqlstr));
+	sprintf( sqlstr,"select name from t_cstm_prsn_base where cstm_no = '%s'",cust_no);
+
+	ret= PqQry( "9996", cust_name, sqlstr );
+	if ( ret != 0 )
+	{
+        	if ( ret == 100 )
+        	{
+            		WriteLog ( DEBUG_LVL1, "对私客户信息无对应记录!");
+            		PutPoolDataByName( "MSGQRY", "RetCode", 0, 0, "003", 0);
+            		PutPoolDataByName( "MSGQRY", "RetMsg", 0, 0, "对私客户信息无对应记录!", 0);
+            		/*return(-1);*/
+        	}
+        	else
+        	{
+           		WriteLog ( ERR_LVL, "调用PQDS查询出错[%d]", ret);
+           		PutPoolDataByName( "MSGQRY", "RetCode", 0, 0, "003", 0);
+           		PutPoolDataByName( "MSGQRY", "RetMsg", 0, 0, "查询个人客户信息PQDS出错!", 0);
+           		return(-1);
+        	}
+    	}
+
+	WriteLog( APP_LVL,"cust_name[%s]",cust_name); 
+	trim(cust_name);
+	GetPoolDataByName ( "CBS", "CustName", 0, 0, cust_name, 0);
+
+	/**检查转入账号**/
+	if( (strlen(fixAcct)==0) || (strlen(in_acc)==0) )
+	{
+		/**转入账号为空**/
+		WriteLog( ERR_LVL, "转入账号或子账号为空 in_acc[%s] fixAcct[%s]", in_acc, fixAcct );
+		errcode = 99999;
+		strcpy( err_msg, "转入账号或子账号为空" );
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		return ( -1 );
+	}
+	WriteLog( APP_LVL, "out_card_no[%s]", out_card_no );
+	WriteLog( APP_LVL, "out_acc[%s]", out_acc );
+
+	/**检查账户类型**/
+	if( strcmp( acctTyp, "003" ) != 0 )
+	{
+		WriteLog( ERR_LVL, "定期账户类型[%s]不对", acctTyp );
+		errcode = 99999;
+		sprintf( err_msg, "定期账户类型[%s]不对", acctTyp );
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		return ( -1 );
+		
+	}
+	else	
+	{
+		/**根据存期和账户类型取对应产品码**/
+		GetPoolDataByName( "PAGTBUF", "currtype", 0, 0, curr_type, 0 );
+		GetPoolDataByName( "BUSIIB", "transAmt", 0, 0, s_amt, 0 );
+		rtrim( s_amt );
+		amt = atof( s_amt );
+		WriteLog( APP_LVL, "s_amt[%s]amt[%f]", s_amt, amt );
+		ret = GetPrdnoFromCore( curr_type, acctTyp, savePeriod, s_amt, prd_no );
+		if( ret != 0 )
+		{
+			WriteLog( ERR_LVL, "获取产品码失败!" );
+			if( ret == -2 )
+			{
+				errcode = 99999;
+				strcpy( err_msg, "核心无此账户类型和存期对应的产品!" );
+				PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+				PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+				return ( -1 );
+			}
+			else
+			{
+				errcode = 99999;
+				strcpy( err_msg, "获取产品码失败!" );
+				PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+				PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+				return ( -1 );
+			}
+		}
+		WriteLog( APP_LVL, "prd_no[%s]", prd_no );
+	}
+
+	/**查询出转入方产品码并校验**/
+	trim( in_acc );
+	trim( fixAcct );
+	WriteLog( APP_LVL, "in_acc[%s], fixAcct[%s]", in_acc, fixAcct );
+	ret = AccQryPub5001( in_acc, fixAcct, "2" );
+	if( ret )
+	{
+		WriteLog( ERR_LVL, "调用5001查询转入账号[%s]信息失败", in_acc );
+		errcode = 99999;
+		strcpy( err_msg, "调用5001查询转入账号失败!" );
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		return ( -1 );
+	}
+	memset( cmp_prd_no, 0x00, sizeof( cmp_prd_no ) );
+	GetPoolDataByName ( "BUSIIB2", "FixacctTyp", 0, 0, cmp_prd_no, 0);
+	if( strcmp( prd_no, cmp_prd_no ) != 0 )
+	{
+		WriteLog( ERR_LVL, "产品码校验错prd_no[%s]cmp_prd_no[%s]", prd_no, cmp_prd_no );
+		errcode = 99999;
+		strcpy( err_msg, "产品码校验错!" );
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		return ( -1 );
+	}
+
+	WriteLog( APP_LVL, "开始登记PB日志表" );
+	ret = NetBank_Pub_InsertPbTlrLog( &pb_tlrlog );
+	if( ret < 0 )
+	{
+		WriteLog( ERR_LVL, "登记PB日志表失败![%s] [%d]\n", __FILE__, __LINE__  );
+		errcode = 99999;
+		strcpy( err_msg, "登记PB日志表失败" );
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		return ( -1 );
+	}
+
+	/**账务接口变量准备**/
+	GetPoolDataByName( "PBSYS", "RTranCode", 0, 0, old_tx_code, 0 );
+	rtrim( old_tx_code );
+	strcpy( tx_code, "7162" );
+	rtrim( tx_code );
+	PutPoolDataByName( "ABSHEAD", "_tx_code", 0, 0, tx_code, 0 );
+	PutPoolDataByName( "ABSHEAD", "organ_no", 0, 0, inst_no, 0 );
+	
+	/**正常记账**/
+	PutPoolDataByName( "CBS", "AccSign", 0, 0, "0", 0 );
+	PutPoolDataByName( "CBS", "PaperId", 0, 0, paper_type, 0 );
+	PutPoolDataByName( "CBS", "PaperNo", 0, 0, paper_no, 0 );
+	PutPoolDataByName( "CBS", "InOutFlag", 0, 0, "0", 0 );
+	PutPoolDataByName( "CBS", "OneBkFlag", 0, 0, "0", 0 );
+	PutPoolDataByName( "CBS", "OneBkFlag", 0, 1, "0", 0 );
+	/**交易子码**/
+	PutPoolDataByName( "CBS", "SubTranCode", 0, 0, "01", 0 );
+	/**币种**/
+	GetPoolDataByName( "PAGTBUF", "currtype", 0, 0, curr_type, 0 );
+	rtrim( curr_type );
+	PutPoolDataByName( "CBS", "CurrType", 0, 0, curr_type, 0 );
+	/**摘要码**/
+	summno = CDMTFIX;
+	strcpy( summ_note, "零整续存" );
+	
+	WriteLog( APP_LVL, "summno[%d]", summno );
+	PutPoolDataByName( "CBS", "SummNo", 0, 0, (char *)&summno, 0 );
+	PutPoolDataByName( "CBS", "Summary", 0, 0, summ_note, 0 );
+	PutPoolDataByName( "CBS", "Summary", 0, 1, summ_note, 0 );
+
+	/**转账：0维-转出账号 1维转入账号**/
+	/**现转标志**/
+	PutPoolDataByName( "CBS", "CshTsfFlag", 0, 0, "1", 0 );
+	PutPoolDataByName( "CBS", "CshTsfFlag", 0, 1, "1", 0 );
+	/**内部帐标志**/
+	PutPoolDataByName( "CBS", "AccFlag", 0, 0, "0", 0 );
+	PutPoolDataByName( "CBS", "AccFlag", 0, 1, "0", 0 );
+	/**金额**/
+	GetPoolDataByName( "BUSIIB", "transAmt", 0, 0, s_amt, 0 );
+	rtrim( s_amt );
+	amt = atof( s_amt );
+	WriteLog( APP_LVL, "amt[%s] [%f]", s_amt, amt );
+	PutPoolDataByName( "CBS", "Amt", 0, 0, &amt, 0 );
+	PutPoolDataByName( "CBS", "Amt", 0, 1, &amt, 0 );
+	/**账号**/
+	/**
+	PutPoolDataByName( "CBS", "Account", 0, 0, out_acc, 0 );
+	**核心记账必须传卡号，新开户的账户才能挂到卡号上**/
+	PutPoolDataByName( "CBS", "Account", 0, 0, out_card_no, 0 );
+	PutPoolDataByName( "CBS", "Account", 0, 1, in_acc, 0 );
+	/**5710记账:新开户必须要传下挂卡号**/
+	PutPoolDataByName( "CBS", "OutAcct", 0, 1, out_card_no, 0 );
+	SubAcc = atol(fixAcct);
+	WriteLog( APP_LVL, "Subacc[%s] [%ld]", fixAcct, SubAcc );
+	PutPoolDataByName( "CBS", "AccId", 0, 1, &SubAcc, 0 );
+
+	GetPoolDataByName( "ABSHEAD", "_seq_no", 0, 0, hostseqno, 0 );
+	PutPoolDataByName("ABSHEAD","list_seqno",0,0, hostseqno,0);
+
+	PutPoolDataByName( "ABSHEAD", "chnl_no", 0, 0, "W", 0);
+
+	/**调用记账接口**/
+	ret = PbRegAcc();
+	GetPoolDataByName( "ABSHEAD", "_host_stat", 0, 0, &hoststat, 0 );
+	if( ret != 0 )
+	{
+		WriteLog( ERR_LVL, "Call PbRegAcc Err!" );
+		if( ret == -1 )
+		{
+			WriteLog( ERR_LVL, "PbRegAcc timeout!" );
+			errcode = 99999;
+			strcpy( err_msg, "交易超时，请在账户查询里查询余额及子账户!" );
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		}
+		else
+		{
+			WriteLog( ERR_LVL, "核心记账失败!hoststat[%d]", hoststat );
+			errcode = 99999;
+			memset( err_msg, 0x00, sizeof( err_msg ) );
+			GetPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			trim( err_msg );
+			if( strlen( err_msg ) == 0 )
+			{
+				strcpy( err_msg, "核心记账失败" );
+			}
+			ret = DelNetBank_PL_AccJnl( pb_tlrlog.tran_date, pb_tlrlog.tran_seqno );
+			if( ret < 0 )
+			{
+				WriteLog( ERR_LVL, "删除ACCJNL表失败!" );
+				strcpy( err_msg, "删除ACCJNL表失败!" );
+				PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+				PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+				return ( -1 );
+			}
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		}
+		WriteLog( ERR_LVL, "记账失败!" );
+		return ( -1 );
+	}
+	WriteLog( APP_LVL, "out_acc[%s]fixAcct[%s]", out_acc, fixAcct);
+	/**取定期账号(因可能是新开户，所以从5710返回报文中取定期账户)**/
+	/*memset( in_acc, 0x00, sizeof( in_acc ) );
+  GetPoolDataByName( "CBS", "Account", 0, 1, in_acc, 0 );
+	PutPoolDataByName( "BUSIIB", "fixAcct", 0, 0, in_acc, 0 );*/
+
+	ret = AccQryPub5711( out_acc );
+	if( ret )
+	{
+		WriteLog( ERR_LVL, "查询活期账户余额失败!" );
+		errcode = 99999;
+		strcpy( err_msg, "查询活期账户余额失败!");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		return ( -1 );
+	}
+	GetPoolDataByName( "CBS", "TranBranch", 0, 0, curAcctBal, 0 );
+	GetPoolDataByName( "CBS", "TxFlag", 0, 0, curAcctAvlBal, 0 );
+	/* add by wangxiaorui20140311*/
+	f_curAcctBal=atof( curAcctBal );
+	f_curAcctAvlBal=atof( curAcctAvlBal );
+	f_curAcctBal/=100;
+	f_curAcctAvlBal/=100;
+	memset( curAcctBal, 0x00, sizeof( curAcctBal ) );
+	memset( curAcctAvlBal, 0x00, sizeof( curAcctAvlBal ) );
+	sprintf( curAcctBal, "%.02f", f_curAcctBal );
+	sprintf( curAcctAvlBal, "%.02f", f_curAcctAvlBal );
+	/*end add */
+	PutPoolDataByName( "BUSIIB", "curAcctBal", 0, 0, curAcctBal, 0 );
+	PutPoolDataByName( "BUSIIB", "curAcctAvlBal", 0, 0, curAcctAvlBal, 0 );
+	ret = AccQryPub5001( in_acc, fixAcct, "2" );
+	if( ret )
+	{
+		WriteLog( ERR_LVL, "查询定期账户余额失败!" );
+		errcode = 99999;
+		strcpy( err_msg, "查询定期账户余额失败!");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		return ( -1 );
+	}
+	GetPoolDataByName( "BUSIIB2", "Fixbal", 0, 0, fixBal, 0 );
+	GetPoolDataByName( "BUSIIB2", "FixavlBal", 0, 0, fixAvlBal, 0 );
+	GetPoolDataByName( "BUSIIB2", "FixintrstBgnDt", 0, 0, bngDt, 0 );
+	GetPoolDataByName( "BUSIIB2", "FixdueDt", 0, 0, dueDt, 0 );
+	GetPoolDataByName( "BUSIIB2", "FixintrstRate", 0, 0, rate, 0 );
+	/* add by wangxiaorui20140311 */
+	f_fixBal=atof( fixBal );
+	f_fixAvlBal=atof( fixAvlBal );
+	drate=atof( rate );
+	memset( fixBal, 0x00, sizeof( fixBal ) );
+	memset( fixAvlBal, 0x00, sizeof( fixAvlBal ) );
+	memset( rate, 0x00, sizeof( rate ) );
+	sprintf( fixBal, "%.02f", f_fixBal );
+	sprintf( fixAvlBal, "%.02f", f_fixAvlBal );
+	sprintf( rate, "%.02f", drate );
+	/* end add */
+	PutPoolDataByName( "BUSIIB", "fixBal", 0, 0, fixBal, 0 );
+	PutPoolDataByName( "BUSIIB", "fixAvlBal", 0, 0, fixAvlBal, 0 );
+	PutPoolDataByName( "BUSIIB", "intrstBgnDt", 0, 0, bngDt, 0 );
+	PutPoolDataByName( "BUSIIB", "dueDt", 0, 0, dueDt, 0 );
+	PutPoolDataByName( "BUSIIB", "intrstRate", 0, 0, rate, 0 );
+	
+	GetPoolDataByName( "ABSHEAD", "_seq_no", 0, 0, hostSeqNb, 0 );
+	PutPoolDataByName( "BUSIIB", "hostSeqNb", 0, 0, hostSeqNb, 0 );
+
+	PutPoolDataByName( "BUSIIB", "fixAcct", 0, 0, fixAcct, 0 );
+
+	return ( 0 );
+}
+
+long 
+NetBank_Pub_InsertPbTlrLog( pb_tlrlog )
+EXEC SQL BEGIN DECLARE SECTION;
+struct s_pb_tlrlog *pb_tlrlog;
+EXEC SQL END DECLARE SECTION;
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+	struct s_pb_tlrlog ap;
+	EXEC SQL END DECLARE SECTION;
+	char out_tran_no[40+1];
+
+
+	memset( &ap, 0x00, sizeof( ap ) );
+	memset( out_tran_no, 0x00, sizeof( out_tran_no ) );
+
+	PayGetCoreDate( pb_tlrlog->tran_date );
+
+	GetPoolDataByName( "ABSHEAD", "_seq_no", 0, 0, pb_tlrlog->tran_seqno, 0 );
+	GetPoolDataByName( "PBSYS", "BusiType", 0, 0, pb_tlrlog->busi_type, 0 );
+	/**
+	GetPoolDataByName( "ABSHEAD", "organ_no", 0, 0, pb_tlrlog->tran_inst, 0 );
+	**/
+
+	GetPoolDataByName( "ABSHEAD", "_tlr_no", 0, 0, pb_tlrlog->tran_tlr, 0 );
+	GetPoolDataByName( "PBSYS", "RChnlNo", 0, 0, pb_tlrlog->chnl_no, 0 );
+	GetPoolDataByName( "PBSYS", "RTranCode", 0, 0, out_tran_no, 0 );
+	GetPoolDataByName( "PBSYS", "TranCode", 0, 0, pb_tlrlog->tran_no, 0 );
+	strncpy( pb_tlrlog->out_tran_no, out_tran_no, 10 );
+	pb_tlrlog->out_tran_no[10] = '\0';
+	GetPoolDataByName( "ABSHEAD", "chnl_no", 0, 0, pb_tlrlog->chnl_type, 0 );
+
+	strcpy(pb_tlrlog->tran_type,"1");
+	strcpy(pb_tlrlog->tran_stat,"2");
+
+	GetCurTimeStr(pb_tlrlog->time_stmp);
+
+	memcpy( &ap, pb_tlrlog, sizeof( struct s_pb_tlrlog ) );
+	PrintPBTlrLog( &ap );
+	EXEC SQL INSERT INTO t_pb_tlrlog VALUES ( :ap );
+	if( sqlca.sqlcode )
+	{
+		WriteLog( ERR_LVL, "Insert t_pb_tlrlog error [%d]", sqlca.sqlcode );
+		return ( -1 );
+	}
+
+	return ( 0 );
+}
+long 
+AccQryPub5711( acc )
+char *acc;
+{
+	char old_tran_no[40+1];
+	char old_op_stat[1+1];
+	char old_chnl_no[1+1];
+
+	long ret = 0;
+	long hoststat = 0;
+
+	memset( old_tran_no, 0x00, sizeof( old_tran_no ) );
+	memset( old_op_stat, 0x00, sizeof( old_op_stat ) );
+	memset( old_chnl_no, 0x00, sizeof( old_chnl_no ) );
+
+	GetPoolDataByName( "ABSHEAD", "chnl_no", 0, 0, old_chnl_no, 0 );
+	GetPoolDataByName( "ABSHEAD", "_tx_code", 0, 0, old_tran_no, 0 );
+	GetPoolDataByName( "ABSHEAD", "_tx_op_stat", 0, 0, old_op_stat, 0 );
+
+	PutPoolDataByName( "ABSHEAD", "chnl_no", 0, 0, "4", 0 );
+	PutPoolDataByName( "ABSHEAD", "_tx_code", 0, 0, "5711", 0 );
+	PutPoolDataByName( "ABSHEAD", "_tx_op_stat", 0, 0, "N", 0 );
+
+	PutPoolDataByName( "CBS", "Addr", 0, 0, acc, 0 );
+	WriteLog( APP_LVL, "5711查询打包[%s]", acc );
+
+	ret = Data_PackFml( "110|5711|0" );
+	if( ret )
+	{
+		WriteLog( ERR_LVL, "5711 pack err" );
+		return ( -1 );
+	}
+	ret = Comm_AcCallFmlAndUnpack( "110|PBSVC|5711|1" );
+	if( ret )
+	{
+		WriteLog( ERR_LVL, "5711发送或解包错!" );
+		return ( -1 );
+	}
+	GetPoolDataByName( "ABSHEAD", "_host_stat", 0, 0, &hoststat, 0 );
+	if( hoststat == 0 )
+	{
+		WriteLog( APP_LVL, "5711调用成功" );
+	}
+	else
+	{
+		if( hoststat == -1 )
+		{
+			WriteLog( ERR_LVL, "5711查询超时" );
+			return ( -1 );
+		}
+		else
+		{
+			WriteLog( ERR_LVL, "5711查询失败" );
+			return ( -1 );
+		}
+	}
+
+	/**还原原交易信息**/
+	PutPoolDataByName( "ABSHEAD", "chnl_no", 0, 0, old_chnl_no, 0 );
+	PutPoolDataByName( "ABSHEAD", "_tx_code", 0, 0, old_tran_no, 0 );
+	PutPoolDataByName( "ABSHEAD", "_tx_op_stat", 0, 0, old_op_stat, 0 );
+
+	return ( 0 );
+}
+
+
+long 
+AccQryPub5001( acc, subacc, seqno )
+char *acc;
+char *subacc;
+char *seqno;
+{
+
+	char tran_seqno[10+1];
+	long hoststat = 0;
+	long tran_flag = 0;
+	char SvrName[16+1];
+	
+	memset( tran_seqno, 0x00, sizeof( tran_seqno ) );
+	memset( SvrName, 0x00, sizeof( SvrName ) );
+	
+	GetPoolDataByName("ABSHEAD", "_seq_no", 0, 0, tran_seqno, 0);
+	WriteLog( ERR_LVL, "tran_seqno[%s]", tran_seqno );
+
+	PutPoolDataByName("ABSHEAD", "_tx_code", 0, 0, "5001", 0);
+    PutPoolDataByName( "ABSHEAD", "_tx_op_stat", 0, 0, "N" , 0 );
+    PutPoolDataByName( "ABSHEAD", "chnl_no", 0, 0, "W", 0 );
+    PutPoolDataByName( "ABSHEAD", "tran_flag", 0, 0, &tran_flag, 0 );
+    PutPoolDataByName( "ABSHEAD", "organ_no", 0, 0, "9996", 0);
+    PutPoolDataByName( "ABSHEAD", "query_inst", 0, 0, "9996", 0);
+    PutPoolDataByName( "ABSHEAD", "_tlr_no", 0, 0, "888886", 0);
+
+	PutPoolDataByName( "PBSYS", "BusiType", 0, 0, "700", 0 );
+
+    /* Commented by MSJ for SC6000Z项目 
+    PutPoolDataByName( "PBSYS", "TranCode", 0, 0, "700930", 0 );*/
+
+    /* 帐号 */
+    PutPoolDataByName ( "BUSIIB", "acct", 0, 0, acc, 0);
+    PutPoolDataByName ( "BUSIIB", "curAcct", 0, 0, subacc, 0);
+
+    /*查询类型*/
+    PutPoolDataByName ( "BUSIIB", "qryCls", 0, 0, "1", 0);
+
+    /* 不进行密码效验 */
+    PutPoolDataByName ( "BUSIIB", "loanCreditFlg", 0, 0, "000011", 0 );
+    WriteLog(APP_LVL, "AccQryPub5001:acc[%s] subacc[%s]", acc, subacc );
+    
+    trim( seqno );
+    sprintf( SvrName, "CoQryCSvr|%s", seqno );
+    WriteLog(ERR_LVL, "SvrName[%s]", SvrName);
+    WriteLog(APP_LVL, "=======FML打包========");
+    
+    if(0 != CommClient( SvrName ))
+    {
+        WriteLog(ERR_LVL,"ERROR:调用CoQryCSvr错");
+        return -1;
+    }
+    WriteLog(APP_LVL, "调用核心接口5001成功");
+	
+	return ( 0 );
+}
+
+long 
+GetPrdnoFromCore( curr_type, acctTyp, savePeriod, s_amt, prd_no )
+char *curr_type;
+char *acctTyp;
+char *savePeriod;
+char *s_amt;
+char *prd_no;
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+	char sqlstr[1024+1];
+	char pqqry[1024+1];
+	char prdno[4+1];
+	long cnt = 0;
+	EXEC SQL END DECLARE SECTION;
+
+	struct prdnoinfo prdnoinfo;
+	
+	int ret = 0;
+	double f_amt = 0.00;
+
+	memset( sqlstr, 0x00, sizeof( sqlstr ) );
+	memset( pqqry, 0x00, sizeof( pqqry ) );
+	memset( prdno, 0x00, sizeof( prdno ) );
+	memset( &prdnoinfo, 0x00, sizeof( struct prdnoinfo ) );
+	
+	WriteLog( APP_LVL, "curr_type[%s]", curr_type );
+	WriteLog( APP_LVL, "acctTyp[%s]", acctTyp );
+	WriteLog( APP_LVL, "savePeriod[%s]", savePeriod );
+	WriteLog( APP_LVL, "s_amt[%s]", s_amt );
+	WriteLog( APP_LVL, "prd_no[%s]", prd_no );
+	sprintf( sqlstr,"select prd_no from t_pb_prdno_acctype where currtype = \"%s\" and acctype = \"%s\" and saveperiod = \"%s\"", curr_type, acctTyp, savePeriod );
+	WriteLog( APP_LVL, "sqlstr[%s]", sqlstr );
+	EXEC SQL PREPARE GetPrdNoQry FROM :sqlstr;
+	if( sqlca.sqlcode < 0 )
+	{
+		WriteLog( ERR_LVL, "定义SQL语句失败!sqlca.sqlcode[%d]", sqlca.sqlcode );
+		return ( -1 );
+	}
+	EXEC SQL DECLARE GetPrdNoQryCur SCROLL CURSOR FOR GetPrdNoQry;
+	if( sqlca.sqlcode < 0 )
+	{
+		WriteLog( ERR_LVL, "定义游标出错!sqlca.sqlcode[%d]", sqlca.sqlcode );
+		EXEC SQL FREE GetPrdNoQry;
+		return ( -1 );
+	}
+	EXEC SQL OPEN GetPrdNoQryCur;
+	if( sqlca.sqlcode < 0 )
+	{
+		WriteLog( ERR_LVL, "打开游标出错!sqlca.sqlcode[%d]", sqlca.sqlcode );
+		EXEC SQL FREE GetPrdNoQryCur;
+		EXEC SQL FREE GetPrdNoQry;
+		return ( -1 );
+	}
+	cnt = 0;
+	while(1)
+	{
+		memset( prdno, 0x00, sizeof( prdno ) );
+		memset( pqqry, 0x00, sizeof( pqqry ) );
+		cnt ++;
+		WriteLog( APP_LVL, "cnt[%d]", cnt );
+		EXEC SQL FETCH GetPrdNoQryCur INTO :prdno;
+		if( sqlca.sqlcode == 100 )
+		{
+			WriteLog( ERR_LVL, "未找到对应产品!" );
+			EXEC SQL CLOSE GetPrdNoQryCur;
+			EXEC SQL FREE GetPrdNoQryCur;
+			EXEC SQL FREE GetPrdNoQry;
+			return ( -2 );
+		}
+		else if( sqlca.sqlcode != 0 )
+		{
+			WriteLog( ERR_LVL, "数据库错sqlcode[%d]!", sqlca.sqlcode );
+			EXEC SQL CLOSE GetPrdNoQryCur;
+			EXEC SQL FREE GetPrdNoQryCur;
+			EXEC SQL FREE GetPrdNoQry;
+			return ( -1 );
+		}
+		sprintf( pqqry, "select bgn_amt, bgn_m_amt from t_pub_svt where prd_no = \"%s\" and curr_type = \"%s\"", prdno, curr_type );
+		WriteLog( APP_LVL, "pqqry[%s]", pqqry );
+		ret = PqQry( "9996", (char *)&prdnoinfo, pqqry );
+		if( ret != 0 )
+		{
+			WriteLog( ERR_LVL, "PqQry Err!" );
+			EXEC SQL CLOSE GetPrdNoQryCur;
+			EXEC SQL FREE GetPrdNoQryCur;
+			EXEC SQL FREE GetPrdNoQry;			
+			return ( -1 );
+		}
+		WriteLog( APP_LVL, "bgn_amt[%f]bgn_m_amt[%f]", prdnoinfo.bgn_amt, prdnoinfo.bgn_m_amt );
+		f_amt = atof( s_amt );
+		WriteLog( APP_LVL, "f_amt[%f]s_amt[%s]", f_amt, s_amt );
+		if( prdnoinfo.bgn_amt <= 0.001 )
+		{
+			if( prdnoinfo.bgn_m_amt <= 0.001 )
+			{
+				break;
+			}
+			else
+			{
+				if( f_amt <= prdnoinfo.bgn_m_amt )
+				{
+					break;
+				}
+				else
+				{
+					continue;
+				}
+			}
+		}
+		else
+		{
+			if( f_amt >= prdnoinfo.bgn_amt )
+			{
+				if( prdnoinfo.bgn_m_amt <= 0.001 )
+				{
+					break;
+				}
+				else
+				{
+					if( f_amt <= prdnoinfo.bgn_m_amt )
+					{
+						break;
+					}
+					else
+					{
+						continue;
+					}
+				}
+			}
+			else
+			{
+				continue;
+			}
+		}
+	}
+	memcpy( prd_no, prdno, 4 );
+	WriteLog( APP_LVL, "prd_no[%s]prdno[%s]", prd_no, prdno );
+	EXEC SQL CLOSE GetPrdNoQryCur;
+	EXEC SQL FREE GetPrdNoQryCur;
+	EXEC SQL FREE GetPrdNoQry;
+	return 0;
+}
+long 
+WYGetOutCardNoByAcc( acc )
+char *acc;
+{
+	char CardRelCardNo[32+1];
+	char CardRelAcc[32+1];
+
+	int i = 0;
+
+	memset( CardRelCardNo, 0x00, sizeof( CardRelCardNo ) );
+	memset( CardRelAcc, 0x00, sizeof( CardRelAcc ) );
+
+	GetPoolDataByName( "BUSIIB2", "cardsubAcct", 0, 0, CardRelAcc, 0 );
+	WriteLog( APP_LVL, "acc[%s]CardRelAcc[%s]", acc, CardRelAcc );
+	rtrim( acc );
+	rtrim( CardRelAcc );
+	/***直接从变量池取值，前面调用通用服务已把卡关联信息查询出来***/
+	while( strlen( CardRelAcc ) != 0 || i > 100 )
+	{
+		WriteLog( APP_LVL, "acc[%s]CardRelAcc[%s]", acc, CardRelAcc );
+		if( strcmp( acc, CardRelAcc ) == 0 )
+		{
+			memset( CardRelCardNo, 0x00, sizeof( CardRelCardNo ) );
+			GetPoolDataByName( "BUSIIB2", "cardacct", i, 0, CardRelCardNo, 0 );
+			PutPoolDataByName( "BUSIIB", "acct", 0, 0, CardRelCardNo, 0 );
+			/**成功找到账户对应卡号，返回**/
+			return ( 0 );
+		}
+		memset( CardRelAcc, 0x00, sizeof( CardRelAcc ) );
+		GetPoolDataByName( "BUSIIB2", "cardsubAcct", i, 0, CardRelAcc, 0 );
+		i ++;
+	}
+
+	WriteLog( APP_LVL, "未找到对应卡号" );
+
+	return ( 0 );
+}

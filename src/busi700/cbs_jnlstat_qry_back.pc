@@ -1,0 +1,47 @@
+/*****************************************************
+**函数描述     : 核心交易流水查证后处理 
+**函数用途     : 根据hoststat给核心流水状态赋值
+**输入         ：
+**输出         :  
+**创建日期     ：2010/10/30
+**最后修改日期 ：
+**Create by    : zhaofeng
+*****************************************************/
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <time.h>
+#include "pbconstval.h"
+#include "pbstructdef.h"
+#ifdef ORACLE_DATABASE
+EXEC SQL include "pbranchdb.h";
+#else
+#include "pbranchdb.h"
+#endif
+#include "pberrlog.h"
+#include "pbglbvardef.h"
+#include "pbbasefunc.h"
+
+EXEC SQL  include "pb_s_agt_batch.h";
+
+int
+CbsJnlStatQryBack()
+{
+	long hoststat = 0;
+	
+	WriteLog( APP_LVL, "hoststat[%d]\n", hoststat );
+	/* 从变量池取值 */
+	GetPoolDataByName("ABSHEAD","_host_stat",0,0, (char *)&hoststat,0);
+	if( hoststat == 0 )
+	{
+		PutPoolDataByName("BUSIIB","hostSeqStat", 0, 0, "1",0);
+	}
+	else	
+	{
+		PutPoolDataByName("BUSIIB","hostSeqStat", 0, 0, "2",0);
+	}
+	PutPoolDataByName("ABSHEAD","_host_stat", 0, 0, (char *)&hoststat,0);
+	WriteLog( APP_LVL, "hoststat[%d]\n", hoststat );
+	
+	return( 0 );
+}

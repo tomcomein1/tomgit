@@ -1,0 +1,356 @@
+/*****************************************************
+**º¯ÊıÃèÊö     : µ¥¸öÕË»§ĞÅÏ¢²éÑ¯Ç°´¦Àí 
+**º¯ÊıÓÃÍ¾     : ¸ù¾İµÚÈı·½´«ÈëÊı¾İ¸³Öµ¿ØÖÆ±êÖ¾
+**ÊäÈë         £º  
+**Êä³ö         :  
+**´´½¨ÈÕÆÚ     £º2010/11/02
+**×îºóĞŞ¸ÄÈÕÆÚ £º
+**Create by    : zhaofeng
+*****************************************************/
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <time.h>
+#include "pbconstval.h"
+#include "pbstructdef.h"
+#ifdef ORACLE_DATABASE
+EXEC SQL include "pbranchdb.h";
+#else
+#include "pbranchdb.h"
+#endif
+#include "pberrlog.h"
+#include "pbglbvardef.h"
+#include "pbbasefunc.h"
+
+
+EXEC SQL  include "pb_s_agt_batch.h";
+
+/* Added by zhangxch for XQ-331	¹ØÓÚ×¢²áÆóÒµÍøÒøÊ±Ôö¼Ó¶ÔÕË»§×´Ì¬Ğ£Ñéº¯ on 20141125 BEGIN */
+
+int NET700_KernelHead( char *trancode, char *seqno )
+{
+    long tran_flag = 0L;
+    char content[250+1];
+
+
+    /*¸³Öµ¹«¹²±¨ÎÄÍ·*/
+    PutPoolDataByName("ABSHEAD", "_tx_code", 0, 0, trancode, 0);
+    PutPoolDataByName( "ABSHEAD", "_tx_op_stat", 0, 0, "N" , 0 );
+    PutPoolDataByName( "ABSHEAD", "chnl_no", 0, 0, "W", 0 );
+/*
+    PutPoolDataByName( "ABSHEAD", "_seq_no", 0, 0, seqno, 0 );
+*/
+    PutPoolDataByName( "ABSHEAD", "tran_flag", 0, 0, &tran_flag, 0);
+
+    PutPoolDataByName("PBSYS", "RChnlNo", 0, 0, "700", 0 );
+    PutPoolDataByName("PBSYS", "BusiType", 0, 0, "700", 0 );
+
+    memset( content, 0x00, sizeof( content ) );
+    if (  0 != PayPubGetSysContent( "NET", "ORGNO", content ) )
+    {
+        WriteLog( ERR_LVL,"È¡ÏµÍ³²ÎÊı±í³ö´í NET-ORGNO");
+        return -1;
+    }
+    rtrim( content );
+
+    WriteLog( APP_LVL, "»ú¹¹[%s]", content );
+    PutPoolDataByName( "ABSHEAD", "organ_no", 0, 0, content, 0);
+    PutPoolDataByName( "ABSHEAD", "query_inst", 0, 0, content, 0);
+
+    memset( content, 0x00, sizeof( content ) );
+    if ( 0 != PayPubGetSysContent( "B700", "dum_tlr", content ) )
+    {
+        WriteLog( ERR_LVL,"È¡ÏµÍ³²ÎÊı±í³ö´í B700-dum_tlr");
+        return -1;
+    }
+    rtrim( content );
+
+    WriteLog( APP_LVL, "Ğé¹ñ[%s],tx_code[%s]", content, trancode );
+    PutPoolDataByName( "ABSHEAD", "_tlr_no", 0, 0, content, 0);
+
+    return 0;
+}
+/*****************************************************
+**º¯ÊıÃèÊö     : Ğ£ÑéÆóÒµÓÃ»§ÊÇ·ñÄÜ×ö½»Ò×
+**º¯ÊıÓÃÍ¾     : ÅĞ¶ÏÔ¤¿ª»§×´Ì¬ÊÇ·ñÄÜ½øĞĞ½»Ò×
+**ÊäÈë         £º
+**Êä³ö         : 0:³É¹¦,-1:Ê§°Ü
+*****************************************************/
+long chkAdviceOpenAcct ()
+{
+    int ret = 0;
+    long hoststat = 0;
+    long errcode = 0;
+    char errmsg[80+1];
+    char flag[10+1];
+
+    char cardAcctNb[32+1];
+
+    memset( errmsg, 0x00, sizeof(errmsg) );
+    memset( flag, 0x00, sizeof(flag) );
+    memset(cardAcctNb, 0x00, sizeof(cardAcctNb) );
+
+    /* ±¨ÎÄÍ· */
+    if( NET700_KernelHead( "5711", "0" ) != 0 ) {
+        errcode = 99999;
+        strcpy( errmsg, "×éÖ¯±¨ÎÄÍ·´í!");
+        PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode,0 );
+        PutPoolDataByName("ABSHEAD","_error_code", 0, 0, errmsg,0);
+        return -1;
+    }
+
+    /*±¨Ìå*/
+    /* ´Ó±äÁ¿³ØÖĞÈ¡ÕËºÅ */
+    memset( cardAcctNb, 0x00, sizeof( cardAcctNb ) );
+    GetPoolDataByName( "BUSIIB", "acct", 0, 0, cardAcctNb, 0 );
+    rtrim (cardAcctNb);
+    WriteLog(DEBUG_LVL0, "¿¨ºÅ/ÕËºÅ cardAcctNb=[%s]", cardAcctNb);
+    PutPoolDataByName ( "CBS", "Addr", 0, 0, cardAcctNb, 0);
+
+    WriteLog(DEBUG_LVL0, "=============FML´ò°ü===============");
+    ret=Data_PackFml("110|5711|0");
+    if(ret)
+    {
+        errcode = 99999;
+        strcpy( errmsg, "FML´ò°ü´í!");
+        PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode,0 );
+        PutPoolDataByName("ABSHEAD","_error_code", 0, 0, errmsg,0);
+        return -1;
+    }
+
+    if(0 != Comm_AcCallFmlAndUnpack("110|PBSVC|5711|1"))
+    {
+        WriteLog(ERR_LVL,"ERROR:FMLÍ¨Ñ¶½â°ü´í");
+        errcode = 99999;
+        strcpy( errmsg, "FMLÍ¨ĞÅ½â°ü´í!" );
+        PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode,0 );
+        PutPoolDataByName("ABSHEAD","_error_code", 0, 0, errmsg,0);
+
+        return -1;
+    }
+    GetPoolDataByName( "ABSHEAD", "_host_stat", 0, 0, &hoststat, 0 );
+    GetPoolDataByName( "ABSHEAD", "_error_code", 0, 0, errmsg, 0 );
+
+    if( 0 == hoststat )
+    {
+        WriteLog( DEBUG_LVL0, "5711½»Ò×³É¹¦." );
+    }
+    else
+    {
+        if( -1 == hoststat )
+        {
+             errcode = 99999;
+             strcpy( errmsg, "5711Í¨ĞÅ³¬Ê±!" );
+             WriteLog( APP_LVL, "5711´íÎó[%s]", errmsg );
+             PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode,0 );
+             PutPoolDataByName("ABSHEAD","_error_code", 0, 0, errmsg,0);
+        }
+        else
+        {
+             errcode = 99999;
+             WriteLog( APP_LVL, "5711´íÎó[%s]", errmsg );
+             PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode,0 );
+        }
+        return -1;
+    }
+
+    /* È¡³ö±êÖ¾ÅĞ¶ÏÕËºÅÔ¤¿ª»§×´Ì¬ 8 unit ¶ */
+    GetPoolDataByName( "CBS", "PrintNo", 0, 0, flag, 0 );
+    WriteLog( APP_LVL, "DEBUGÕË»§±êÖ¾[%s]", flag ); 
+
+    if ( flag[7] == '1' )
+    {
+        errcode = 99999;
+        strcpy( errmsg, "ÕË»§ÎªÔ¤¿ª»§×´Ì¬£¬Î´¼¤»î!" );
+        PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode,0 );
+        PutPoolDataByName("ABSHEAD","_error_code", 0, 0, errmsg,0);
+
+        return -1;
+    }
+
+    /*add by fjx 20150910 for ¹²¹ÜÕË»§²»ÔÊĞí×öÍøÒø½»Ò×*/
+    if ( flag[8] == '1' )  /*1-¹²¹ÜÕË»§ 0-Õı³£*/
+    {
+        errcode = 99999;
+        strcpy( errmsg, "¹²¹ÜÕË»§Ôİ²»Ö§³Ö¿ª»§»òÕËÎñ½»Ò×!");
+        PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode,0 );
+        PutPoolDataByName("ABSHEAD","_error_code", 0, 0, errmsg,0);
+
+        return -1;
+    }
+    /* add end */
+
+    return 0;
+}
+
+/* Added by zhangxch for XQ-331	¹ØÓÚ×¢²áÆóÒµÍøÒøÊ±Ôö¼Ó¶ÔÕË»§×´Ì¬Ğ£Ñéº¯ on 20141125 END */
+int
+acctInfoQry()
+{
+	int ret;
+	char flag[2+1];
+	char type[2+1];
+    char clearpwd[128+1];
+	char pwdbuf[128+1];
+	char cardAccrNbbuf[32+1];
+	/*****test**
+	char pwdtmp[128+1];
+    memset(pwdtmp, 0, sizeof(pwdtmp));
+    ****end test***/
+
+    /** add dly 20110411 begin **/
+    char errmsg[128+1];
+	long errcode = 0;
+	char subAcct[32+1];
+	char acctflg[2+1];
+	char acct[32+1];
+	char ChkFlag[8+1];
+
+	memset( subAcct, 0x00, sizeof( subAcct ) );
+	memset( errmsg, 0x00, sizeof( errmsg ) );
+	memset( acctflg, 0x00, sizeof( acctflg ) );
+	memset( acct, 0x00, sizeof( acct ) );
+	memset( ChkFlag, 0x00, sizeof( ChkFlag ) );
+	strcpy( ChkFlag, "00000000");
+
+    /** add dly 20110411 end **/
+
+/* Added by zhangxch for XQ-331	¹ØÓÚ×¢²áÆóÒµÍøÒøÊ±Ôö¼Ó¶ÔÕË»§×´Ì¬Ğ£Ñéº¯ on 20141125 BEGIN */
+	if( chkAdviceOpenAcct() != 0 ) {
+		WriteLog( ERR_LVL, "Ğ£ÑéÊÇ·ñÔ¤¿ª»§ chkAdviceOpenAcct fail" );
+		return (-1);
+        }
+	WriteLog( APP_LVL, "chkAdviceOpenAcct OK! ");
+/* Added by zhangxch for XQ-331	¹ØÓÚ×¢²áÆóÒµÍøÒøÊ±Ôö¼Ó¶ÔÕË»§×´Ì¬Ğ£Ñéº¯ on 20141125 END */
+
+
+	memset(clearpwd, 0, sizeof(clearpwd));
+	memset(pwdbuf, 0, sizeof(pwdbuf));
+    memset(cardAccrNbbuf, 0, sizeof(cardAccrNbbuf));
+	/* ´Ó±äÁ¿³ØÈ¡Öµ */
+	GetPoolDataByName("BUSIIB","chkPwdFlg",0,0,flag,0);
+	GetPoolDataByName("BUSIIB","pwdTyp",0,0,type,0);
+	GetPoolDataByName("BUSIIB","pwd",0,0,pwdbuf,0);
+	GetPoolDataByName("BUSIIB","acct",0,0,cardAccrNbbuf,0);
+	rtrim(flag);
+	rtrim(type);
+	rtrim(pwdbuf);
+	rtrim(cardAccrNbbuf);
+
+
+	/* ÅĞ¶Ï */
+	if(flag[0] == '0')
+	{
+	    /* modify dly 20110601 
+		PutPoolDataByName("BUSIIB","loanCreditFlg", 0, 0, "000",0);
+		*/
+	}
+	else if(flag[0] == '1')
+	{
+		if( type[0] == '2')
+		{	
+			/***ADD by Y.st 20110130*****/
+			/***test***
+			UnionEncryptPin((char *)pwdbuf,(char *)cardAccrNbbuf, (char *)pwdtmp);
+			WriteLog(ERR_LVL,"PPPPPP1: %s\n",flag);
+			memset(pwdbuf, 0, sizeof(pwdbuf));
+			memcpy(pwdbuf, pwdtmp, sizeof(pwdtmp));
+			**endtest**/
+		    /****½âÃÜ****/
+
+			/* begin delete by yuwenxue 20131008 *
+		     * ½«Ô­Ê¼ÃÜÎÄ´«ÈëÍøÒø·şÎñ,
+		     * ÖØĞÂ½âÃÜ,¼ÆËã2ÖÖÃÜÎÄ(12 or 16Î»)
+		     *	WriteLog(ERR_LVL,"PPPPPP2: %s\n",flag);
+			ret = UnionDecryptPin((char *)pwdbuf, (char *)cardAccrNbbuf,(char *)clearpwd);
+			 WriteLog(APP_LVL,"222222222%s",pwdbuf);
+			 WriteLog(APP_LVL,"%s",cardAccrNbbuf);
+			if(ret != 0)
+			{
+			  errcode = 99999;
+			  strcpy( errmsg, "½âÃÜ³ö´í" );
+              PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode,0);
+              PutPoolDataByName("ABSHEAD","_error_code", 0, 0, errmsg,0);
+			  WriteLog(ERR_LVL,"EERROR:½âÃÜ³ö´í!\n");
+			  return(-1);
+			}
+           * WriteLog(ERR_LVL,"PWD: %s\n",clearpwd);*
+			**¼ÓÃÜ***
+			memset(pwdbuf, 0, sizeof(pwdbuf));
+			if ( SC6000_3Des(1, (char *)clearpwd, (char *)pwdbuf))
+		  	{
+			 	errcode = 99999;
+			  	strcpy( errmsg, "¼ÓÃÜ³ö´í");
+			  	PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode,0);
+			  	PutPoolDataByName("ABSHEAD","_error_code", 0, 0, errmsg,0);
+			  	WriteLog(ERR_LVL,"EERROR:¼ÓÃÜ³ö´í!\n");
+			  	return(-1);
+		  	}
+			* end delete by yuwenxue 20131008 */
+
+            PutPoolDataByName("BUSIIB","pwd",0,0,pwdbuf,0);
+			/***END ADD**/
+
+			/* modify dly 20110601 
+			PutPoolDataByName("BUSIIB","loanCreditFlg", 0, 0, "001",0);
+			*/
+		    ChkFlag[2] = '1';	
+
+
+		}else
+		{
+			  errcode = 99999;
+			  strcpy( errmsg, "ÃÜÂë³ö´í" );
+              PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode,0);
+              PutPoolDataByName("ABSHEAD","_error_code", 0, 0, errmsg,0);
+
+		      WriteLog(ERR_LVL,"EERROR:ÃÜÂë³ö´í!\n");
+		      return(-1);		
+		}
+	}else
+	{
+		errcode = 99999;
+		strcpy( errmsg, "ÃÜÂë³ö´í" );
+		PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode,0);
+		PutPoolDataByName("ABSHEAD","_error_code", 0, 0, errmsg,0);
+
+		WriteLog(ERR_LVL,"EERROR:ÃÜÂë³ö´í!\n");
+		return(-1);
+	}
+
+	/** add by dly 20110601 begin **/
+	GetPoolDataByName("BUSIIB","acctflg",0,0,acctflg,0);
+	WriteLog(APP_LVL, "bbbb[%s]", acctflg );
+	if( acctflg[0] == '1' )
+	{
+		GetPoolDataByName("BUSIIB","acct",0,0,acct,0);
+		WriteLog(APP_LVL, "bbbb[%s]", acct );
+
+		if( IsCardNo( acct ) == 0 )
+		{
+/**mopdify by wangou 20130909ÔÊĞí¹ÒÊ§¡¢Ëø¶¨¿¨²éÑ¯**
+		    ChkFlag[6] = '2';
+********/
+		}
+
+	}
+
+	PutPoolDataByName("BUSIIB","loanCreditFlg", 0, 0, ChkFlag,0);
+
+	/** add by dly 20110601 end **/
+
+	/** add by dly 20110411 begin **/
+
+	GetPoolDataByName("BUSIIB","subAcct",0,0,subAcct,0);
+
+	rtrim( subAcct );
+
+	if( strlen( subAcct ) > 10 )
+	{
+		PutPoolDataByName("BUSIIB","acct", 0, 0, subAcct,0);
+	}
+
+	/** add by dly 20110411 end **/
+
+	return( 0 );
+}

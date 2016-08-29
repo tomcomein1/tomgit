@@ -1,0 +1,251 @@
+/*PB3.0系统自动生成demo源码文件*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <time.h>
+#include "pbconstval.h" 
+#include "pbstructdef.h" 
+#ifdef ORACLE_DATABASE
+EXEC SQL include "pbranchdb.h";
+#else
+#include "pbranchdb.h"
+#endif
+#include "pberrlog.h"
+#include "pbglbvardef.h"
+#include "pbbasefunc.h"
+
+EXEC SQL  include "pb_s_agt_batch.h";
+
+int AgtBatchSendQry ()
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+	struct s_sc_agt_batch agt_batch;
+	char batch_no[10+1];
+	char instno[4+1];
+	char hopedate[10+1];
+	char chnlseqno[32+1];
+	char btchNb[32+1];
+	char bgn_date[10+1];
+	char end_date[10+1];
+	char work_date[10+1];
+	char btchNm[50+1];
+	char err_code[6+1];
+	char err_msg[256+1];
+	long agt_num = -1;
+	long total_num = -1;
+	EXEC SQL END DECLARE SECTION;
+	char dealDtTm[20+1];
+	char tmpstr[256+1];
+	char curr_type[10+1];
+	long errcode = 0;
+	long i_bgn_date = 0;
+	long i_end_date = 0;
+	long i_hope_date = 0;
+
+	memset( &agt_batch, 0, sizeof( agt_batch ) );
+	memset( batch_no, 0, sizeof( batch_no ) );
+	memset( instno, 0, sizeof( instno ) );
+	memset( hopedate, 0, sizeof( hopedate ) );
+	memset( chnlseqno, 0, sizeof( chnlseqno ) );
+	memset( btchNb, 0, sizeof( btchNb ) );
+	memset( bgn_date, 0, sizeof( bgn_date ) );
+	memset( end_date, 0, sizeof( end_date ) );
+	memset( work_date, 0, sizeof( work_date ) );
+	memset( btchNm, 0, sizeof( btchNm ) );
+	memset( err_code, 0, sizeof( err_code ) );
+	memset( err_msg, 0, sizeof( err_msg ) );
+	memset( dealDtTm, 0, sizeof( dealDtTm ) );
+	
+	/***从变量池中取值***/
+	GetPoolDataByName( "PBSYS", "SysDate", 0, 0, work_date, 0 );
+	GetPoolDataByName( "BUSIIB", "thmseqNb", 0, 0, chnlseqno, 0 );
+	GetPoolDataByName( "BUSIIB", "btchNb", 0, 0, btchNb, 0 );
+	GetPoolDataByName( "BUSIIB", "bgnDt", 0, 0, bgn_date, 0 );
+	GetPoolDataByName( "BUSIIB", "endDt", 0, 0, end_date, 0 );
+	
+	rtrim( bgn_date );
+	rtrim( end_date );
+	/***查询网银流水表***/
+	EXEC SQL SELECT batchno, instno, hopedate, agt_num
+		INTO :batch_no, :instno, :hopedate, :agt_num
+		FROM t_pb_net_dtl
+		WHERE btchnb = :btchNb;
+	if( sqlca.sqlcode != 0 )
+	{
+		WriteLog( ERR_LVL, "sqlcode[%d]\n", sqlca.sqlcode );
+		if( sqlca.sqlcode == 100 )
+		{
+			errcode = 20027;
+			strcpy( err_msg, "无此批次号!" );
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			return (-1);
+		}
+		else
+		{
+			strcpy( err_code, "20028" );
+			errcode = 20028;
+			strcpy( err_msg, "代发工资查询失败!" );
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			return (-1);
+		}
+	}
+	WriteLog( APP_LVL, "batchno[%s],hopedate[%s],agt_num[%d],instno[%s],work_date[%s]\n", batch_no, hopedate, agt_num, instno, work_date );
+	
+	i_bgn_date = atol( bgn_date );
+	i_end_date = atol( end_date );
+	i_hope_date = atol( hopedate );
+	WriteLog( APP_LVL, "i_bgn_date[%ld]i_end_date[%ld]i_hope_date[%ld]\n", i_bgn_date, i_end_date, i_hope_date );
+	if( i_hope_date > i_end_date || i_hope_date < i_bgn_date )
+	{
+		WriteLog( ERR_LVL, "所查询的批次不在起始日期内!" );
+		errcode = 20009;
+		strcpy( err_msg, "要查询的记录不存在!" );
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		return (-1);
+	}
+
+	/***查询批量项目管理表查批次名***/
+	EXEC SQL SELECT item_name INTO :btchNm
+		FROM t_sc_agt_bat_item_mgmt
+		WHERE batch_no = :batch_no
+		AND inst_no = :instno;
+	if( sqlca.sqlcode != 0 )
+	{
+		WriteLog( ERR_LVL, "sqlcode[%d]\n", sqlca.sqlcode );
+		if( sqlca.sqlcode == 100 )
+		{
+			strcpy( err_code, "20009" );
+			errcode = 20009;
+			strcpy( err_msg, "要查询的记录不存在!" );
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			return (-1);
+		}
+		else
+		{
+			strcpy( err_code, "20028" );
+			errcode = 20028;
+			strcpy( err_msg, "代发工资查询失败!" );
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			return (-1);
+		}
+	}
+
+	EXEC SQL SELECT * INTO :agt_batch 
+		FROM t_sc_agt_batch
+		WHERE batch_no = :batch_no
+		/**
+		AND hope_date >= :bgn_date
+		AND hope_date <= :end_date
+		**/
+		AND hope_date = :hopedate
+		AND inst_no = :instno
+		AND agt_num = :agt_num;
+	if( sqlca.sqlcode != 0 )
+	{
+		WriteLog( ERR_LVL, "sqlcode[%d]\n", sqlca.sqlcode );
+		if( sqlca.sqlcode == 100 )
+		{
+			strcpy( err_code, "20009" );
+			errcode = 20009;
+			strcpy( err_msg, "要查询的记录不存在!" );
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			return (-1);
+		}
+		else
+		{
+			strcpy( err_code, "20028" );
+			errcode = 20028;
+			strcpy( err_msg, "代发工资查询失败!" );
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			return (-1);
+		}
+	}
+	
+	WriteLog( APP_LVL, "btchNb[%s]\n", btchNb );	
+	PutPoolDataByName( "BUSIIB", "btchNb", 0, 0, btchNb, 0 );
+	WriteLog( APP_LVL, "btchNm[%s]\n", btchNm );	
+	PutPoolDataByName( "BUSIIB", "btchNm", 0, 0, btchNm, 0 );
+	WriteLog( APP_LVL, "totalQnt[%d]\n", agt_batch.total_num );
+	memset( tmpstr, 0x00, sizeof( tmpstr ) );
+	sprintf( tmpstr, "%d", agt_batch.total_num );
+	PutPoolDataByName( "BUSIIB", "totalQnt", 0, 0, tmpstr, 0 );
+	WriteLog( APP_LVL, "totalAmt[%f]\n", agt_batch.total_amt );	
+	memset( tmpstr, 0x00, sizeof( tmpstr ) );
+	sprintf( tmpstr, "%f", agt_batch.total_amt );
+	PutPoolDataByName( "BUSIIB", "totalAmt", 0, 0, tmpstr, 0 );
+	
+	WriteLog( APP_LVL, "currencyTyp[%s]\n", agt_batch.curr_type );	
+	/****转换币种****/
+	if( strcmp( agt_batch.curr_type, "01" )  == 0 )
+	{
+		memset( curr_type, 0x00, sizeof( curr_type ) );
+		strcpy( curr_type, "CNY" );
+	}
+	else if( strcmp( agt_batch.curr_type, "02" ) == 0 )
+	{
+		memset( curr_type, 0x00, sizeof( curr_type ) );
+		strcpy( curr_type, "HKD" );
+	}
+	else if( strcmp( agt_batch.curr_type, "03" ) == 0 )
+	{
+		memset( curr_type, 0x00, sizeof( curr_type ) );
+		strcpy( curr_type, "USD" );
+	}
+	else
+	{
+		WriteLog( ERR_LVL, "币种类型有误!" );
+	}
+
+	PutPoolDataByName( "BUSIIB", "currencyTyp", 0, 0, curr_type, 0 );
+	WriteLog( APP_LVL, "cashFlg[%s]\n", agt_batch.curr_iden );	
+	
+	/***转换钞汇标志***/
+	if( strcmp( agt_batch.curr_type, "01" ) == 0 )
+	{
+		PutPoolDataByName( "BUSIIB", "cashFlg", 0, 0, "2", 0 );
+	}
+	else
+	{
+		PutPoolDataByName( "BUSIIB", "cashFlg", 0, 0, agt_batch.curr_iden, 0 );
+	}
+	WriteLog( APP_LVL, "remarkCd[%s]\n", agt_batch.summ_code );	
+	PutPoolDataByName( "BUSIIB", "remarkCd", 0, 0, agt_batch.summ_code, 0 );
+	WriteLog( APP_LVL, "remark[%s]\n", agt_batch.note );
+	PutPoolDataByName( "BUSIIB", "remark", 0, 0, agt_batch.note, 0 );
+	WriteLog( APP_LVL, "work_date[%s],work_time[%s]\n", agt_batch.work_date, agt_batch.work_time );	
+	strcpy( dealDtTm, agt_batch.work_date );
+	rtrim( dealDtTm );
+	rtrim( agt_batch.work_time );
+	WriteLog( APP_LVL, "dealDtTm[%s]\n", dealDtTm );
+	strcat( dealDtTm, agt_batch.work_time );
+	rtrim( dealDtTm );
+	WriteLog( APP_LVL, "dealDtTm[%s]\n", dealDtTm );
+	PutPoolDataByName( "BUSIIB", "dealDtTm", 0, 0, dealDtTm, 0 );
+	
+	WriteLog( APP_LVL, "succQnt[%d]\n", agt_batch.succ_num );
+	memset( tmpstr, 0x00, sizeof( tmpstr ) );
+	sprintf( tmpstr, "%d", agt_batch.succ_num );
+	PutPoolDataByName( "BUSIIB", "succQnt", 0, 0, tmpstr, 0 );
+	WriteLog( APP_LVL, "succAmt[%d]\n", agt_batch.succ_amt );
+	memset( tmpstr, 0x00, sizeof( tmpstr ) );
+	sprintf( tmpstr, "%f", agt_batch.succ_amt );
+	PutPoolDataByName( "BUSIIB", "succAmt", 0, 0, tmpstr, 0 );
+	
+	WriteLog( APP_LVL, "errQnt[%d]\n", agt_batch.fail_num );
+	sprintf( tmpstr, "%d", agt_batch.fail_num );
+	PutPoolDataByName( "BUSIIB", "errQnt", 0, 0, tmpstr, 0 );
+	WriteLog( APP_LVL, "erramt[%d]\n", agt_batch.fail_amt );
+	memset( tmpstr, 0x00, sizeof( tmpstr ) );
+	sprintf( tmpstr, "%f", agt_batch.fail_amt );
+	PutPoolDataByName( "BUSIIB", "erramt", 0, 0, tmpstr, 0 );
+	
+	return ( 0 );
+}

@@ -1,0 +1,318 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <time.h>
+#include "pbconstval.h" 
+#include "pbstructdef.h" 
+#ifdef ORACLE_DATABASE
+EXEC SQL include "pbranchdb.h";
+#else
+#include "pbranchdb.h"
+#endif
+#include "pberrlog.h"
+#include "pbglbvardef.h"
+#include "pbbasefunc.h"
+EXEC SQL include "pbsrv.h";
+
+#define ZERO_AMT 0.001
+
+/************************************
+InfowinAccount 网银集团转账前记账准备
+input:
+output
+*************************************/
+long
+InfowinAccount ()
+{
+EXEC SQL BEGIN DECLARE SECTION;
+	char out_inst[10+1];
+	char inn_inst[10+1];
+	double fee;
+	char pb_date[10+1];
+	char pb_seqno[10+1];
+EXEC SQL END DECLARE SECTION;
+	char summ_no[20+1];
+	char out_acc[32+1];
+	char in_acc[32+1];
+	char fee_flag[2+1];
+	char feein_acc[32+1];
+	char c_tran_amt[20+1];
+	char c_fee[20+1];
+	char mid_ser[32+1];
+	char s_avalbal[20+1];
+	char s_bal[20+1];
+	char core_err[60+1];
+	char curr_type[6+1];
+	char clr_acc[32+1];
+	char tag_in[100+1];
+	char tag_out[100+1];
+	char dist_flag[1+1];
+	char s_real_amt[20+1];
+	char s_real_fee[20+1];
+	double tran_amt;
+	double avalbal;
+	double bal;
+	double real_fee;
+	double real_amt;
+	long ret;
+	long core_err_no;
+	long chg_flag;
+
+	memset( tag_in, 0, sizeof( tag_in));
+	memset( dist_flag, 0, sizeof( dist_flag));
+	memset( tag_out, 0, sizeof( tag_out));
+	memset( clr_acc, 0, sizeof( clr_acc));
+	memset( out_inst, 0, sizeof( out_inst));
+	memset( inn_inst, 0, sizeof( inn_inst));
+	memset( out_acc, 0, sizeof( out_acc));
+	memset( in_acc, 0, sizeof( in_acc));
+	memset( feein_acc, 0, sizeof( feein_acc));
+	memset( fee_flag, 0, sizeof( fee_flag));
+	memset( c_fee, 0, sizeof( c_fee));
+	memset( c_tran_amt, 0, sizeof( c_tran_amt));
+	memset( summ_no, 0, sizeof( summ_no));
+	memset( mid_ser, 0, sizeof( mid_ser));
+	memset( s_avalbal, 0, sizeof( s_avalbal));
+	memset( s_bal, 0, sizeof( s_bal));
+	memset( core_err, 0, sizeof( core_err));
+	memset( curr_type, 0, sizeof( curr_type));
+	memset( s_real_amt, 0, sizeof( s_real_amt));
+	memset( s_real_fee, 0, sizeof( s_real_fee));
+	memset( pb_date, 0, sizeof( pb_date));
+	memset( pb_seqno, 0, sizeof( pb_seqno));
+
+	tran_amt = 0.00;
+	fee = 0.00;
+	avalbal = 0.00;
+	real_fee = 0.00;
+	real_amt = 0.00;
+	bal = 0.00;
+	ret = 0;
+
+	/*报文头*/
+	/*柜员*/
+	PutPoolDataByName( "ABSHEAD", "_tlr_no", 0, 0, "888888", 0);
+	/*渠道*/
+	PutPoolDataByName( "ABSHEAD", "chnl_no", 0, 0, "W", 0);
+	/*取核心日期*/
+	PayGetCoreDate( pb_date);
+	/*取流水号*/
+	GetPoolDataByName( "ABSHEAD", "_seq_no", 0, 0, pb_seqno, 0);
+
+	/*核心记账属性*/
+	PutPoolDataByName( "CBS", "AccSign", 0, 0, "0", 0);	/*0-记账 1-开户*/
+	/*摘要*/
+	PutPoolDataByName( "CBS", "Summary", 0, 0, "集团支付", 0);
+	/*摘要码*/
+	strcpy( summ_no,"200");
+	PutPoolDataByName( "CBS", "KeyData", 0, 0, summ_no, 0);
+
+	/*机构号*/
+	/*转出开户行*/
+	GetPoolDataByName(  "ABSHEAD", "organ_no",0, 0, out_inst, 0);
+	rtrim(out_inst);
+	WriteLog( APP_LVL, "out_inst[%s]", out_inst);
+	/*转入开户行*/
+	GetPoolDataByName(  "CBS", "BatNo",0, 0, inn_inst, 0);
+	rtrim(inn_inst);
+	WriteLog( APP_LVL, "inn_inst[%s]", inn_inst);
+	/*计算跨度*/
+	ret = ChkInputInstScope ( inn_inst, out_inst);
+	if ( ret < 0)
+	{
+		WriteLog ( ERR_LVL, "取跨度失败");
+		strcpy( core_err, "取跨度失败");
+		core_err_no = 99999;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char*)&core_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, core_err, 0 );
+		return ( -1);
+	}
+	else
+	{
+		WriteLog ( ERR_LVL, "跨度为%d", ret);
+		sprintf ( dist_flag, "%d", ret);
+		WriteLog ( ERR_LVL, "跨度dist_flag[%c]", dist_flag[0]);
+	}
+
+	/*金额*/
+	GetPoolDataByName( "BUSIIB", "transAmt", 0, 0, c_tran_amt, 0);
+	tran_amt = atof( c_tran_amt);
+	PutPoolDataByName( "CBS", "Amt", 0, 0, (char*)&tran_amt, 0);
+	/*币种*/
+	GetPoolDataByName( "BUSIIB", "payCurTyp", 0, 0, curr_type, 0 );
+	PutPoolDataByName( "BUSIIB", "currencyTyp", 0, 0, curr_type, 0 );
+	ret = NetParaConv( "currencyTyp|cashFlg");
+	if( ret)
+	{
+		WriteLog( ERR_LVL, "网银参数转换错");
+		strcpy( core_err, "网银参数转换错");
+		core_err_no = -1;
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "39999", 0 );
+		PutPoolDataByName( "BUSIIB", "thsdesc", 0, 0, core_err, 0 );
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char*)&core_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, core_err, 0 );
+		return( -1);
+	}
+	GetPoolDataByName( "PAGTBUF", "currtype", 0, 0, curr_type, 0);
+	PutPoolDataByName( "CBS", "CurrType", 0, 0, curr_type, 0);
+
+	/*是否有中间账号*/
+	GetPoolDataByName( "BUSIIB", "seqNb", 0, 0, mid_ser, 0);
+
+	/*手续费*/
+	if( atol(mid_ser) >0) /*有中间过渡账号*/
+	{
+		/*计算手续费*/
+		/*手续费*/
+		core_err_no = 90002;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char*)&core_err_no, 0);
+		WriteLog( ERR_LVL, "未开通此类业务");
+		return( -1);
+		GetPoolDataByName( "BUSIIB", "fee", 0, 0, c_fee, 0);
+		fee = atof( c_fee);
+		PutPoolDataByName( "CBS", "Fee1", 0, 0, (char*)&fee, 0);
+	}
+	else	/*无中间过渡账号*/
+	{
+		/*试算手续费*/
+		/*test* 集团支付暂不处理手续费
+		chg_flag = 0;
+		sprintf( tag_in, "A001:001;B001:002;C001:%s;AMT1:%.2f;", "1", tran_amt);
+		WriteLog( APP_LVL, "tag_in[%s]", tag_in);
+		ret = NetFeeRule( chg_flag, tag_in, NULL, &tag_out, &fee);
+		if( ret < 0)
+		{
+			WriteLog( ERR_LVL, "调用手续费试算失败");
+			strcpy( core_err, "手续费试算失败");
+			core_err_no = -1;
+			PutPoolDataByName( "BUSIIB", "thsdesc", 0, 0, core_err, 0);
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char*)&core_err_no,0);
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, core_err, 0 );
+			return( -1);
+		}
+		fee = 2.0;
+		*/
+		/*test*/
+		WriteLog( APP_LVL, "fee[%d]", fee);
+	}
+
+
+	/*实际收费额*/
+	real_amt = tran_amt + fee;
+	sprintf( s_real_amt, "%.2f", real_amt);
+	PutPoolDataByName( "BUSIIB", "realTotalFee", 0, 0, s_real_amt, 0);
+	/*实际手续费*/
+	real_fee = fee;
+	sprintf( s_real_fee, "%.2f", real_fee);
+	PutPoolDataByName( "BUSIIB", "realManFee", 0, 0, s_real_fee, 0);
+
+
+	/*交易子码 手续费 账号*/
+	if( atol(mid_ser) >0) /*有中间过渡账号*/
+	{
+		core_err_no = 90002;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char*)&core_err_no, 0);
+		WriteLog( ERR_LVL, "未开通此类业务");
+		strcpy( core_err, "未开通此类业务");
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, core_err, 0 );
+		return( -1);
+		PutPoolDataByName( "CBS", "SubTranCode", 0, 0, "01", 0);
+	}
+	else
+	{
+		/*账号*/
+		GetPoolDataByName( "BUSIIB", "payCardAcctNb", 0, 0, out_acc, 0);
+		GetPoolDataByName( "BUSIIB", "rcvAcct", 0, 0, in_acc, 0);
+		WriteLog( APP_LVL, "out_acc[%s]in_acc[%s]", out_acc, in_acc);
+
+		PutPoolDataByName( "BUSIIB", "payCardAcctNb", 0, 1, in_acc, 0);
+		PutPoolDataByName( "BUSIIB", "rcvAcct", 0, 1, out_acc, 0);
+
+		/*金额*/
+		PutPoolDataByName( "CBS", "Amt", 0, 0, (char*)&tran_amt, 0);
+		PutPoolDataByName( "CBS", "Amt", 0, 1, (char*)&tran_amt, 0);
+
+		WriteLog( ERR_LVL, "fee[%f]",fee);
+		if( (atoi( dist_flag) > 3) &&  (fee> 0.001))   /*跨地市*/
+		{
+			PutPoolDataByName( "CBS", "SubTranCode", 0, 0, "03", 0);
+			PutPoolDataByName( "CBS", "Amt", 0, 0, &tran_amt, 0);
+			PutPoolDataByName( "CBS", "Amt", 0, 3, &fee, 0);
+			PutPoolDataByName( "CBS", "Amt", 0, 2, &fee, 0);
+			ret = PayPubGetSysContent("NET", "clr_acc",clr_acc);
+			if( ret)
+			{
+				WriteLog( ERR_LVL, "取清算中心挂账户错");
+				strcpy( core_err, "取清算中心挂账户错");
+				core_err_no = -1;
+				PutPoolDataByName( "BUSIIB", "thsdesc", 0, 0, core_err, 0);
+				PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char*)&core_err_no,0);
+				PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, core_err, 0 );
+				return( -1);
+			}
+			sprintf( feein_acc, "%s015%s", "9999", clr_acc);    /*手续费收入账号取值方法*/
+			PutPoolDataByName( "BUSIIB", "rcvAcct", 0, 2, out_acc, 0);
+			PutPoolDataByName( "BUSIIB", "payCardAcctNb", 0, 2, feein_acc, 0);
+			PutPoolDataByName( "BUSIIB", "rcvAcct", 0, 3, feein_acc, 0);
+			PutPoolDataByName( "BUSIIB", "payCardAcctNb", 0, 3, out_acc, 0);
+			strcpy( summ_no,"340");
+			PutPoolDataByName( "CBS", "KeyData", 0, 3, summ_no, 0);
+		}
+		else
+		{
+			PutPoolDataByName( "CBS", "SubTranCode", 0, 0, "02", 0);
+		}
+	}
+
+	/*更新明细表*/
+	EXEC SQL UPDATE t_pb_net_dtl
+		SET payinstno = :out_inst,
+		rcvinstno = :inn_inst,
+		accinstno = :out_inst,
+		fee1 = :fee
+		WHERE trandate = :pb_date
+		AND seqno = :pb_seqno;
+	if( sqlca.sqlcode || sqlca.sqlerrd[2] != 1)
+	{
+		WriteLog( ERR_LVL, "update net_dtl err[%d][%d]", sqlca.sqlcode, sqlca.sqlerrd[2]);
+		WriteLog( ERR_LVL, "pb_date[%s]pb_seqno[%s]", pb_date, pb_seqno);
+		strcpy( core_err, "数据库操作失败");
+		core_err_no = -1;
+		PutPoolDataByName( "BUSIIB", "thsdesc", 0, 0, core_err, 0);
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char*)&core_err_no,0);
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, core_err, 0 );
+		return( -1);
+	}
+
+	/*预计算转出账户余额 可用余额*/
+	GetPoolDataByName( "BUSIIB", "payAvlBal", 0, 0, s_avalbal, 0);
+	WriteLog( APP_LVL, "s_avalbal before[%s]", s_avalbal);
+	avalbal = atof(s_avalbal);
+	if( fee > ZERO_AMT)
+		avalbal = avalbal - ( tran_amt + fee);
+	else
+		avalbal -= tran_amt;
+	memset( s_avalbal, 0, sizeof( s_avalbal));
+	sprintf( s_avalbal, "%16.2f", avalbal);
+	WriteLog( APP_LVL, "s_avalbal after[%s]", s_avalbal);
+	PutPoolDataByName( "BUSIIB", "payAvlBal", 0, 0, s_avalbal, 0);
+
+	GetPoolDataByName( "BUSIIB", "payBal", 0, 0, s_bal, 0);
+	WriteLog( APP_LVL, "s_bal before[%s]", s_bal);
+	bal =  atof( s_bal);
+	if( fee > ZERO_AMT)
+		bal = bal - ( tran_amt + fee);
+	else
+		bal -= tran_amt;
+	memset( s_bal, 0, sizeof( s_bal));
+	sprintf( s_bal, "%16.2f", bal);
+	WriteLog( APP_LVL, "s_bal after[%s]", s_bal);
+	PutPoolDataByName( "BUSIIB", "payBal", 0, 0, s_bal, 0);
+
+
+	WriteLog( APP_LVL, "tran_amt[%f],fee[%f]", tran_amt, fee);
+
+
+	return( 0);
+}
+

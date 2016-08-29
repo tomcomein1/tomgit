@@ -1,0 +1,429 @@
+/*****************************************************
+**函数描述     : 网银卡账户挂失
+**函数用途     : 网银卡账户挂 失
+**输入         ：    
+**输出         : 无 
+**创建日期     ：2011/04/14
+**最后修改日期 ：
+**Create by    :dly 
+*****************************************************/
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <time.h>
+#include "pbconstval.h"
+#include "pbstructdef.h"
+#ifdef ORACLE_DATABASE
+EXEC SQL include "pbranchdb.h";
+#else
+#include "pbranchdb.h"
+#endif
+#include "pberrlog.h"
+#include "pbglbvardef.h"
+#include "pbbasefunc.h"
+
+int
+WY_Card_Loss()
+{
+    char 	Acc[25+1];
+	char	PaperType[1+1];
+	char 	PaperNo[19+1];
+	char 	PbSeqno[10+1];
+	char    c_err_no[4+1];/*核心错误码*/
+	char 	msg[100];
+	char    err_msg[40+1];		/*错误消息*/
+	char 	retcode[4+1];
+	char s_hold_app_no[20+1]; /*挂失申请书编号 huangkun 2013-10-08*/
+
+	long    app_err_no=0;               /*错误码*/
+	long 	ret = 0;
+	long    hoststat=0;                 /*主机状态*/
+	long    errcode = 0;
+	long hold_app_no = 0;
+	/**add by sqf for 网银IC卡挂失 begin 20130618**/
+	char type[1+1];
+	char cstm_no[14+1];
+	char seqno[10+1];
+	char in[1024+1];
+	char out[1024+1];
+	char *p = NULL;
+	char *q = NULL;
+	char LossRegSN[12+1];
+	char content[100+1];
+	/**add by sqf for 网银IC卡挂失 end 20130618**/
+	char  Cardflg[10+1];
+
+	memset ( Acc, 0, sizeof ( Acc));
+	memset ( PaperType, 0, sizeof ( PaperType));
+	memset ( PaperNo, 0, sizeof ( PaperNo));
+	memset ( PbSeqno, 0, sizeof ( PbSeqno));
+	memset ( c_err_no, 0, sizeof ( c_err_no));
+	memset ( msg, 0, sizeof ( msg));
+	memset ( err_msg, 0, sizeof ( err_msg));
+	memset ( retcode, 0, sizeof ( retcode));
+	memset ( s_hold_app_no, 0, sizeof ( s_hold_app_no));
+	/**add by sqf for 网银IC卡挂失 begin 20130618**/
+	memset ( type, 0x00, sizeof ( type ) );
+	memset ( cstm_no, 0x00, sizeof ( cstm_no ) );
+	memset ( seqno, 0x00, sizeof ( seqno ) );
+	memset ( in, 0x00, sizeof ( in ) );
+	memset ( out, 0x00, sizeof ( out ) );
+	memset ( LossRegSN, 0x00, sizeof ( LossRegSN ) );
+	memset ( content, 0x00, sizeof ( content ) );
+	/**add by sqf for 网银IC卡挂失 end 20130618**/
+	memset ( Cardflg, 0x00, sizeof ( Cardflg ) );
+	
+	GetPoolDataByName("BUSIIB", "cardAcctNb", 0, 0, Acc, 0 );
+     /* Added by MSJ 20131106 - 增加对卡状态检查 */
+    GetPoolDataByName( "CBS", "ClsSeqNo", 0, 0, Cardflg, 0);
+    rtrim( Cardflg );
+    WriteLog( APP_LVL, "Cardflg[%s]", Cardflg );
+    
+    /* Added by MSJ 20140615 - 对非卡户挂失直接报错 */
+    rtrim( Acc );
+    if( IsCardNo( Acc )!=0 )
+    {
+        WriteLog( ERR_LVL, "账号[%s]非卡号", Acc );
+        errcode = 99999;
+        strcpy( err_msg, "本交易仅支持卡挂失，不支持账号挂失");
+        PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode, 0);
+        PutPoolDataByName("ABSHEAD","_error_code", 0, 0, err_msg, 0);
+        return -1;
+    }
+    
+    /**
+    if( Cardflg[0] != '0' )
+    {
+       WriteLog( ERR_LVL, "卡[%s]已销户Cardflg[%s]", Acc, Cardflg );
+       errcode = 10004;
+       strcpy( err_msg, "卡已销户");
+       PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode, 0);
+       PutPoolDataByName("ABSHEAD","_error_code", 0, 0, err_msg, 0);
+       return -1;
+    }**/
+    if( Cardflg[2] != '0' )
+    {
+       WriteLog( ERR_LVL, "卡[%s]已挂失Cardflg[%s]", Acc, Cardflg );
+       errcode = 10011;
+       strcpy( err_msg, "卡已挂失");
+       PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode, 0);
+       PutPoolDataByName("ABSHEAD","_error_code", 0, 0, err_msg, 0);
+       return -1;
+    }
+    /**else if( Cardflg[3] != '0')
+    {
+       WriteLog( ERR_LVL, "卡[%s]已锁定Cardflg[%s]", Acc, Cardflg );
+       errcode = 99999;
+       strcpy( err_msg, "卡已锁定");
+       PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode, 0);
+       PutPoolDataByName("ABSHEAD","_error_code", 0, 0, err_msg, 0);
+       return -1;
+    }**/
+    else
+    {
+        WriteLog( ERR_LVL, "Cardflg[%s] ", Cardflg );
+    }
+    /* Added by MSJ 20131106 - End */
+	/**add by sqf for 网银IC卡挂失 begin 20130618**/
+	rtrim( Acc );
+	if( IsCardNo( Acc ) == 0 )
+	{
+		ret = DivisionCardType( Acc, type );
+		if( ret )
+		{
+			WriteLog( ERR_LVL, "判断卡类型出错!");
+			errcode = 99999;
+			strcpy( msg, "判断卡类型出错!" );
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, msg, 0 );
+			return ( -1 );
+		}
+		if( get_TTseqno( seqno ) )
+		{
+			WriteLog( ERR_LVL, "获取流水出错!");
+			errcode = 99999;
+			strcpy( msg, "获取流水出错!" );
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, msg, 0 );
+			return ( -1 );
+		}
+	}
+	else
+	{
+		strcpy( type, "1" );
+	}
+	if( type[0] == '2' )
+	{
+		WriteLog( APP_LVL, "Acc[%s]是IC卡", Acc );
+		ret = CallCore5711( Acc );
+		if( ret )
+		{
+			WriteLog( ERR_LVL, "查询卡信心失败!");
+			errcode = 99999;
+			strcpy( msg, "查询卡信心失败!" );
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, msg, 0 );
+			return ( -1 );
+		}
+		GetPoolDataByName( "CBS", "distflag", 0, 0, PaperType, 0 );
+		rtrim( PaperType );
+		GetPoolDataByName( "CBS", "AcctStat", 0, 0, PaperNo, 0 );
+		rtrim( PaperNo );
+		GetPoolDataByName( "CBS", "CustNo", 0, 0, cstm_no, 0 );
+		rtrim( cstm_no );
+		
+		/**传给第三方的证件类型编号和核心不同，需转换**/
+		WriteLog( APP_LVL, "cstm_no[%s]", cstm_no );
+		WriteLog( APP_LVL, "PaperType[%s]before", PaperType );
+		WriteLog( APP_LVL, "PaperNo[%s]", PaperNo );
+    /*modify by heyz for SC6000Z on 20131217 start*/
+    if ('0' == cstm_no[4])
+    {
+        if (strcmp(PaperType, "0") == 0)
+        {
+            strcpy(PaperType, "0");
+        }
+        else if (strcmp(PaperType, "1") == 0)
+        {
+            strcpy(PaperType, "8");
+        }
+        else if (strcmp(PaperType, "2") == 0)
+        {
+            strcpy(PaperType, "6");
+        }
+        else if (strcmp(PaperType, "3") == 0)
+        {
+            strcpy(PaperType, "2");
+        }
+        else if (strcmp(PaperType, "4") == 0)
+        {
+            strcpy(PaperType, "2");
+        }
+        else if (strcmp(PaperType, "5") == 0)
+        {
+            strcpy(PaperType, "7");
+        }
+        else if (strcmp(PaperType, "6") == 0)
+        {
+            strcpy(PaperType, "7");
+        }
+        else if (strcmp(PaperType, "7") == 0)
+        {
+            strcpy(PaperType, "0");
+        }
+        else if (strcmp(PaperType, "8") == 0)
+        {
+            strcpy(PaperType, "z");
+        }
+        else if (strcmp(PaperType, "9") == 0)
+        {
+            strcpy(PaperType, "9");
+        }
+        else if (strcmp(PaperType, "A") == 0)
+        {
+            strcpy(PaperType, "1");
+        }       
+        else if (strcmp(PaperType, "B") == 0)
+        {
+            strcpy(PaperType, "5");
+        }
+        else if (strcmp(PaperType, "X") == 0)
+        {
+            strcpy(PaperType, "z");
+        }
+        else
+        {
+            strcpy(PaperType, "z");
+        }
+    }
+    else
+    {
+         if( strcmp( PaperType, "1" ) == 0 )
+         {
+               strcpy( PaperType, "z" );
+         }
+         else if (strcmp(PaperType, "2") == 0)
+         {
+               strcpy(PaperType, "3");
+         }
+         else if (strcmp(PaperType, "3") == 0)
+         {
+               strcpy(PaperType, "4");
+         }
+         else if (strcmp(PaperType, "4") == 0)
+         {
+               strcpy(PaperType, "z");
+         }
+         else if (strcmp(PaperType, "9") == 0)
+         {
+               strcpy(PaperType, "z");
+         }
+         else
+         {
+               strcpy(PaperType, "z");
+         }
+    }
+    /*modify by heyz for SC6000Z on 20131217 stop*/		
+		WriteLog( APP_LVL, "PaperType[%s]after", PaperType );
+		WriteLog( APP_LVL, "in[%s]\n", in );
+		/**组上传包**/
+		/**依次是卡号，证件类型，证件号码，客户号，卡密码密文，代理证件号码，代理证件类型，渠道标志，挂失类型，前置流水号，卡片版本号，校验密码标志**/
+		/**因为前面调用5001有校验密码，所以这里校验密码标志为不校验**/
+		sprintf( in, "%s|@|", Acc );
+		sprintf( in+strlen(in), "%s|@|", PaperType );
+		sprintf( in+strlen(in), "%s|@|", PaperNo );
+		sprintf( in+strlen(in), "%s|@|", cstm_no );
+		sprintf( in+strlen(in), "|@|" );
+		sprintf( in+strlen(in), "|@|" );
+		sprintf( in+strlen(in), "|@|" );
+		sprintf( in+strlen(in), "2|@|" );
+		sprintf( in+strlen(in), "0|@|" );
+		sprintf( in+strlen(in), "%s|@|", seqno );
+		sprintf( in+strlen(in), "|@|" );
+		sprintf( in+strlen(in), "0|@|" );
+		WriteLog( APP_LVL, "in[%s]\n", in );
+		ret = CallICPub( "750100", in, out );
+		if( ret )
+		{
+			WriteLog( ERR_LVL, "IC卡挂失失败!");
+			errcode = 99999;
+			strcpy( msg, "IC卡挂失失败!" );
+			ret = GetContent( out, content, 2, msg ); 
+			if( ret == 0 )
+			{
+				memset( msg, 0x00, sizeof( msg ) );	
+				strcpy( msg, content );
+			}
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, msg, 0 );
+			return ( -1 );
+		}
+		WriteLog( ERR_LVL, "out[%s]\n", out );
+		ret = GetContent( out, LossRegSN, 3, msg );
+		if( ret )
+		{
+			WriteLog( ERR_LVL, "msg[%s]", msg );
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, msg, 0 );
+			return ( -1 );
+		}
+		WriteLog( ERR_LVL, "LossRegSN[%s]", LossRegSN );
+		PutPoolDataByName( "BUSIIB", "lostNb", 0, 0, LossRegSN, 0 );
+		return ( 0 );
+	}
+	WriteLog( APP_LVL, "Acc[%s]非IC卡", Acc );
+	/**add by sqf for 网银IC卡挂失 end 20130618**/
+	
+	/*0181挂失前变量池赋值*/
+	PutPoolDataByName( "ABSHEAD", "chnl_no", 0, 0, "t", 0);
+	PutPoolDataByName("ABSHEAD", "_tlr_no", 0, 0,"888891" , 0);
+	PutPoolDataByName("ABSHEAD", "organ_no", 0, 0,"9996" , 0);
+	PutPoolDataByName("ABSHEAD", "_tx_code", 0, 0,"0181" , 0);
+	PutPoolDataByName( "ABSHEAD", "_tx_op_stat", 0, 0, "N" , 0 );
+    
+	PutPoolDataByName("CSTM", "PingYing", 0, 0,Acc , 0);
+	PutPoolDataByName("CSTM", "CstmType", 0, 0,"1" , 0);
+	PutPoolDataByName("CSTM", "DataType", 0, 0,"0" , 0);
+	PutPoolDataByName("CSTM", "Level", 0, 0,"0" , 0);
+	PutPoolDataByName("CSTM", "PaperType", 0, 0,"" , 0);
+	PutPoolDataByName("CSTM", "PaperNo", 0, 0,"" , 0);
+	PutPoolDataByName("CSTM", "Degree", 0, 0,"1" , 0);
+
+    WriteLog(ERR_LVL, "=======FML打包前Acc[%s]==========",Acc);
+    WriteLog(APP_LVL, "=============FML打包===============");
+    ret=Data_PackFml("110|0181|0");
+    if(ret)
+    {
+        WriteLog( ERR_LVL, "FML打包错");
+        errcode = 99999;
+        strcpy( msg, "FML打包错" );
+        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, msg, 0 );
+        
+        return -1;
+    }
+    WriteLog(APP_LVL, "=============与核心通讯===============");
+
+	ret = Comm_AcCallFmlAndUnpack("110|CDMSVC|0181|1");
+    if( ret)
+    {
+        WriteLog( ERR_LVL, "发送或者解包错");
+        errcode = 99999;
+        strcpy( msg, "发送或者解包错" );
+        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, msg, 0 );
+        return -1;
+    }
+
+    /**取核心错误返回码**/
+    GetPoolDataByName("ABSHEAD", "app_err_no", 0, 0, &app_err_no, 0);
+    WriteLog(APP_LVL, "核心错误码[%ld]\n",app_err_no);
+    sprintf( c_err_no, "%d", app_err_no);
+    GetPoolDataByName( "ABSHEAD", "_host_stat", 0, 0, &hoststat, 0 );
+    if( hoststat == 0)
+    {
+        WriteLog( ERR_LVL,"调用挂失解挂成功");
+    }
+    else
+    {
+        if( hoststat == -1)
+        {
+            
+            WriteLog( ERR_LVL, "通讯超时");
+            errcode = 99999;
+            strcpy( msg, "通讯超时" );
+            PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+            PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, msg, 0 );
+            return ( -1);
+        }
+        else
+        {
+            WriteLog( ERR_LVL, "调用挂失解挂失败");
+            errcode = 99999;
+            strcpy( msg, "调用挂失解挂失败" );
+            PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+            /* PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, msg, 0 ); */
+            return (-1);
+        }
+    }
+    /*把原来的挂失申请书编号FloatCycle变成PerLove huangkun 2013-10-08*/
+    GetPoolDataByName( "CSTM", "PerLove", 0, 0, s_hold_app_no, 0 );
+	/*sprintf( s_hold_app_no, "%ld", hold_app_no ); 
+	//WriteLog( APP_LVL, "hold_app_no[%s][%ld]", s_hold_app_no, hold_app_no ); */
+	PutPoolDataByName( "BUSIIB", "lostNb", 0, 0, s_hold_app_no, 0 );
+	return( 0 );
+}
+/**add by sqf for 网银IC卡挂失 begin 20130618**/
+int
+GetContent( char *in, char *out, int num, char *msg )
+{
+	char *p = NULL;
+	char *q = NULL;
+	int i = 0;
+	p = in;
+	if( num <= 0 )
+	{
+		WriteLog( ERR_LVL, "参数传入错num[%d]!", num );
+		strcpy( msg, "参数传入错!" );
+		return ( -1 );
+	}
+	for( ; i < num; i++ )
+	{
+		q = strstr( p, "|@|" );
+		if( q == NULL )
+		{
+			WriteLog( ERR_LVL, "解IC卡返回包失败!");
+			strcpy( msg, "解IC卡返回包失败!" );
+			return ( -1 );
+		}
+		if( i == num - 1 )
+		{
+			strncpy( out, p, q-p );
+		}
+		p = q + 3;
+	}
+	WriteLog( ERR_LVL, "out[%s]", out );
+	return ( 0 );
+}
+/**add by sqf for 网银IC卡挂失 end 20130618**/

@@ -1,0 +1,748 @@
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <time.h>
+#include <iconv.h>
+#include "pbconstval.h"
+#include "pbstructdef.h"
+#ifdef ORACLE_DATABASE
+EXEC SQL include "pbranchdb.h";
+#else
+#include "pbranchdb.h"
+#endif
+#include "pberrlog.h"
+#include "pbglbvardef.h"
+#include "pbbasefunc.h"
+char * sca_iconv(char* from_charset, char* to_charset, char *inbuf);
+
+long
+Card_Msg_sign_before(char *para)
+{
+	char seqno[11], timestmp[14+1],signAcc[33],signPhone[129];
+	char accno[33],accnm[129],paperno[25],papertype[2],trancode[40+1];
+	char err_code[10], err_msg[100],oprtyp[2],size[5],inst_no[10+1],trl_no[6+1],msg[513];
+	time_t local_time = 0;
+	struct tm *tm_time = NULL;
+	long app_err_no=0;
+	char *p,*p1;
+
+	memset( seqno, 0, sizeof(seqno) );
+	memset( timestmp, 0, sizeof(timestmp) );
+	memset( signAcc, 0, sizeof(signAcc) );
+	memset( signPhone, 0, sizeof(signPhone) );
+	memset( accno, 0, sizeof(accno) );
+	memset( accnm, 0, sizeof(accnm) );
+	memset( paperno, 0, sizeof(paperno) );
+	memset( papertype, 0, sizeof(papertype) );
+	memset( err_code, 0, sizeof(err_code) );
+	memset( err_msg, 0, sizeof(err_msg) );
+	memset( trancode, 0, sizeof(trancode) );
+	memset( oprtyp, 0, sizeof(oprtyp) );
+	memset( size, 0, sizeof(size) );
+	memset( inst_no, 0, sizeof(inst_no) );
+	memset( trl_no, 0, sizeof(trl_no) );
+	memset( msg, 0, sizeof(msg) );
+
+	GetPoolDataByName( "PBSYS", "RTranCode", 0, 0, trancode, 0 );
+	rtrim( trancode );
+	GetPoolDataByName( "BUSIIB", "hostSeqNb", 0, 0, seqno, 0);
+	rtrim(seqno);
+
+	PutPoolDataByName( "SMS2", "tempcode", 0, 0, seqno, 0);
+	PutPoolDataByName( "SMS2", "netid", 0, 0, "9909", 0);
+	PutPoolDataByName( "SMS2", "transchannel", 0, 0, "06", 0);
+	local_time = time((time_t *)0);
+	tm_time = localtime(&local_time);
+	strftime(timestmp, sizeof(timestmp), "%Y%m%d%H%M%S", tm_time);
+	PutPoolDataByName("SMS2", "timestamp", 0, 0, timestmp, 0);
+	PutPoolDataByName( "SMS2", "packid", 0, 0, "1", 0);
+	PutPoolDataByName( "SMS2", "tempcode", 0, 0, "9999", 0);
+	PutPoolDataByName( "SMS2", "srcbranch", 0, 0, "9909", 0);
+	PutPoolDataByName( "SMS2", "netid", 0, 0, "9909", 0);
+	PutPoolDataByName( "SMS2", "transcommand", 0, 0, "9909", 0);
+	PutPoolDataByName( "SMS2", "srcsystem", 0, 0, "14", 0);
+	memset(inst_no, 0, sizeof(inst_no));
+	GetPoolDataByName( "BUSIIB", "openBrchID", 0, 0, inst_no, 0);
+
+
+	if( strncmp( trancode, "CBS9010010", 10 ) == 0 )
+    {
+		p=sca_iconv("UTF-8","GB2312",PkgBuff.DataBuff);
+		memset(PkgBuff.DataBuff,0,strlen(PkgBuff.DataBuff));
+		memcpy(PkgBuff.DataBuff,p,strlen(p));
+		free(p);
+
+		p=p1=PkgBuff.DataBuff;
+		if((p=(unsigned char*)strstr((char *)PkgBuff.DataBuff,"<use>")) != NULL)
+		{
+			if((p1=(unsigned char*)strstr((char *)PkgBuff.DataBuff,"</use>")) != NULL)
+			{
+				memcpy(msg,p+5,p1-p-5);
+				PutPoolDataByName( "SMS2", "msg", 0, 0, msg, 0);
+			}
+		}
+		p=p1=PkgBuff.DataBuff;
+		if((p=(unsigned char*)strstr((char *)PkgBuff.DataBuff,"<openBrchID>")) != NULL)
+		{
+			if((p1=(unsigned char*)strstr((char *)PkgBuff.DataBuff,"</openBrchID>")) != NULL)
+			{
+				if( p1-p-16 > 0 && p1-p-16 < 10 )
+				memcpy(inst_no,p+16,p1-p-16);
+			}
+		}
+	}
+	GetPoolDataByName( "RCBIB", "acct", 0, 0, signAcc, 0);
+	if( (strncmp( trancode, "CBS0001100", 10 ) == 0) ||  (strncmp( trancode, "CBS9010010", 10 ) == 0) )
+	{
+		memset( signAcc, 0x00, sizeof(signAcc) );
+		GetPoolDataByName( "BUSIIB", "payCardAcctNb", 0, 0, signAcc, 0);
+	}
+	rtrim(signAcc);
+	if( strlen(signAcc) !=0 )
+	{
+		if(AccQryPub5711( signAcc ) != 0 )
+		{
+			WriteLog( ERR_LVL, "调用5711错" );
+			strcpy( err_code, "99999" );
+			app_err_no=99999;
+			strcpy( err_msg, "查询签约账号出错");
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+			return -1;
+		}
+		GetPoolDataByName( "CBS", "OpenInstNo", 0, 0, inst_no, 0);
+		GetPoolDataByName( "CBS", "CustName", 0, 0, accnm, 0);
+		rtrim(accnm);
+		PutPoolDataByName( "BUSIIB", "custNm", 0, 0, accnm, 0);
+		GetPoolDataByName( "CBS", "AcctStat", 0, 0, paperno, 0);
+		rtrim(paperno);
+		GetPoolDataByName( "CBS", "distflag", 0, 0, papertype, 0);
+		rtrim(papertype);
+	}
+	rtrim(inst_no);
+	strcpy(trl_no,inst_no);
+	strcat(trl_no,"99");
+	if( strncmp( trancode, "CBS0001100", 10 ) == 0 )
+    {
+        PutPoolDataByName( "SMS2", "tempcode", 0, 0, "1402", 0);
+        PutPoolDataByName( "SMS2", "srcbranch", 0, 0, inst_no, 0);
+        PutPoolDataByName( "SMS2", "srcsystem", 0, 0, "14", 0);
+        PutPoolDataByName( "SMS2", "protocol", 0, 0, "C200", 0);
+        return 0;
+    }
+	else if( strncmp( trancode, "CBS9010010", 10 ) == 0 )
+    {
+        PutPoolDataByName( "SMS2", "tempcode", 0, 0, "1401", 0);
+        PutPoolDataByName( "SMS2", "srcbranch", 0, 0, inst_no, 0);
+        PutPoolDataByName( "SMS2", "srcsystem", 0, 0, "14", 0);
+        PutPoolDataByName( "SMS2", "protocol", 0, 0, "C200", 0);
+
+        GetPoolDataByName( "RCBIB", "bookCustTel", 0, 0, signPhone, 0);
+		rtrim( signPhone );
+        PutPoolDataByName( "SMS2", "address", 0, 0, signPhone, 0);
+
+        return 0;
+    }
+	else if( strncmp( trancode, "CBS1004110", 10 ) == 0 )
+	{
+		GetPoolDataByName( "BUSIIB", "qryCls", 0, 0, oprtyp, 0);
+		if( oprtyp[0] == '0' )
+		{
+			GetPoolDataByName( "BUSIIB", "acct", 0, 0, signAcc, 0);
+			rtrim(signAcc);
+			GetPoolDataByName( "BUSIIB", "backup1", 0, 0, signPhone, 0);
+			rtrim(signPhone);
+			if(strlen(signPhone) ==1 && signPhone[0]=='0')
+			{
+				memset(signPhone,0,sizeof(signPhone));
+			}
+			GetPoolDataByName( "BUSIIB", "payCardAcctNb", 0, 0, accno, 0);
+			rtrim(accno);
+			if(strlen(accno) == 0)
+			{
+				strcpy(accno,signAcc);
+				PutPoolDataByName( "BUSIIB", "payCardAcctNb", 0, 0, accno, 0);
+			}
+			PutPoolDataByName( "BUSIIB", "flag", 0, 0, "1", 0);
+			WriteLog( ERR_LVL, "oooooooooooooo" );
+
+			PutPoolDataByName( "SMS2", "protocol", 0, 0, "C8901", 0);
+			PutPoolDataByName( "SMS2", "countid", 0, 0, signAcc, 0);
+			PutPoolDataByName( "SMS2", "address", 0, 0, signPhone, 0);
+			PutPoolDataByName( "SMS2", "accttype", 0, 0, "1", 0);
+			PutPoolDataByName( "SMS2", "kcountid", 0, 0, accno, 0);
+			PutPoolDataByName( "SMS2", "certtype", 0, 0, papertype, 0);
+			PutPoolDataByName( "SMS2", "certid", 0, 0, paperno, 0);
+
+			PutPoolDataByName( "SMS2", "cusname", 0, 0, accnm, 0);
+			PutPoolDataByName( "SMS2", "netid", 0, 0, inst_no, 0);
+			PutPoolDataByName( "SMS2", "operid", 0, 0, trl_no, 0);
+		}
+		else if( oprtyp[0] == '1' )
+		{
+			PutPoolDataByName( "SMS2", "protocol", 0, 0, "C8902", 0);
+			GetPoolDataByName( "RCBIB", "acct", 0, 0, signAcc, 0);
+			rtrim(signAcc);
+			if(signAcc[6] == '4')
+			{
+				PutPoolDataByName( "RCBIB", "acctTyp", 0, 0, "1", 0);
+			}
+			else
+			{
+				PutPoolDataByName( "RCBIB", "acctTyp", 0, 0, "0", 0);
+			}
+			GetPoolDataByName( "RCBIB", "backup1", 0, 0, signPhone, 0);
+			rtrim(signPhone);
+			if(strlen(signPhone) ==1 && signPhone[0]=='0')
+			{
+				memset(signPhone,0,sizeof(signPhone));
+			}
+			PutPoolDataByName( "SMS2", "countid", 0, 0, signAcc, 0);
+			PutPoolDataByName( "SMS2", "address", 0, 0, signPhone, 0);
+			PutPoolDataByName( "SMS2", "accttype", 0, 0, "1", 0);
+			PutPoolDataByName( "SMS2", "deptid", 0, 0, inst_no, 0);
+			PutPoolDataByName( "SMS2", "doid", 0, 0, trl_no, 0);
+		}
+		else
+		{
+			WriteLog( ERR_LVL, "交易类型错" );
+			strcpy( err_code, "99999" );
+			app_err_no=99999;
+			strcpy( err_msg, "交易类型错");
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+			return -1;
+		}
+	}
+	if( strncmp( trancode, "CBS1004100", 10 ) == 0 )
+	{
+		PutPoolDataByName( "SMS2", "protocol", 0, 0, "C8903", 0);
+		GetPoolDataByName( "RCBIB", "acct", 0, 0, signAcc, 0);
+		rtrim(signAcc);
+		GetPoolDataByName( "RCBIB", "turnPageTotalQnt", 0, 0, size, 0);
+		rtrim(size);
+		PutPoolDataByName( "SMS2", "countid", 0, 0, signAcc, 0);
+		PutPoolDataByName( "SMS2", "pagenumber", 0, 0, "1", 0);
+		PutPoolDataByName( "SMS2", "size", 0, 0, "10", 0);
+		PutPoolDataByName( "SMS2", "accttype", 0, 0, "1", 0);
+	}
+	return 0;
+
+}
+long 
+Data_Card_Msg_sign(char *para)
+{
+	char err_code[10], err_msg[100], trancode[40+1];
+	char param[100+1],retcode[11],retmsg[101];
+	char signAcc[33],signPhone[129],packid[11],servicedate[11];
+	char status[3],netid[11],opennetid[11];
+	char tmp[256+1],currentsize[11];
+	char trandate[8+1],seqno[11],sstat[2];
+	char tmptrancode[41],oseqnb[17];
+	int i=0;
+	long app_err_no=0;
+
+	memset( err_code, 0, sizeof(err_code) );
+	memset( err_msg, 0, sizeof(err_msg) );
+	memset( trancode, 0, sizeof(trancode) );
+	memset( param, 0, sizeof( param ) );
+	memset( retcode, 0, sizeof( retcode ) );
+	memset( retmsg, 0, sizeof( retmsg ) );
+	memset( signAcc, 0, sizeof( signAcc ) );
+	memset( signPhone, 0, sizeof( signPhone ) );
+	memset( packid, 0, sizeof( packid ) );
+	memset( servicedate, 0, sizeof( servicedate ) );
+	memset( status, 0, sizeof( status ) );
+	memset( netid, 0, sizeof( netid ) );
+	memset( opennetid, 0, sizeof( opennetid ) );
+	memset( tmp, 0, sizeof( tmp ) );
+	memset( currentsize, 0, sizeof( currentsize ) );
+	memset( trandate, 0, sizeof( trandate ) );
+	memset( seqno, 0, sizeof( seqno ) );
+	memset( sstat, 0, sizeof( sstat ) );
+	memset( tmptrancode, 0, sizeof( tmptrancode ) );
+	memset( oseqnb, 0, sizeof( oseqnb ) );
+
+	GetPoolDataByName( "BUSIIB", "hostSeqNb", 0, 0, seqno, 0);
+	PayGetCoreDate( trandate);
+	GetPoolDataByName( "PBSYS", "RTranCode", 0, 0, trancode, 0 );
+	rtrim( trancode );
+	if( strncmp( trancode, "CBS1004110", 10 ) == 0 )
+	{
+		sprintf(param, "P|700|730005" );
+	}
+	else if( strncmp( trancode, "CBS1004100", 10 ) == 0 )
+	{
+		sprintf(param, "P|700|730009" );
+	}
+	else if( strncmp( trancode, "CBS0001100", 10 ) == 0 )
+    {
+        sprintf(param, "P|700|730018" );
+        strcpy(sstat,"1");
+        PutPoolDataByName( "RCBIB", "flag", 0, 0, sstat , 0);
+        strcpy(tmptrancode,"C200");
+        PutPoolDataByName( "PBSYS", "RTranCode", 0, 0, tmptrancode, 0 );
+    }
+	else if( strncmp( trancode, "CBS9010010", 10 ) == 0 )
+    {
+        sprintf(param, "P|700|730024" );
+        strcpy(sstat,"1");
+        PutPoolDataByName( "RCBIB", "flag", 0, 0, sstat , 0);
+        strcpy(tmptrancode,"C200");
+        PutPoolDataByName( "PBSYS", "RTranCode", 0, 0, tmptrancode, 0 );
+        GetPoolDataByName( "RCBIB", "thmseqNb", 0, 0, oseqnb, 0 );
+		rtrim( oseqnb );
+        PutPoolDataByName( "RCBIB", "seqNb", 0, 0, oseqnb, 0 );
+    }
+	else
+	{
+		WriteLog( ERR_LVL, "交易码错误" );
+		strcpy( err_code, "99999" );
+		app_err_no=99999;
+		strcpy( err_msg, "交易码错误");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	if( Data_Pack( param ) != 0 )
+	{
+		WriteLog( ERR_LVL, "短信平台打包失败" );
+		strcpy( err_code, "99999" );
+		app_err_no=99999;
+		strcpy( err_msg, "处理失败,请稍后再试");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	MsgFlagHandleNew("700", 'S', "3");
+	Data_GetTraceCode("700");
+
+	if( Comm_AcCall( "700003|912348" ) != 0 )
+	{
+		PutPoolDataByName( "PBSYS", "RTranCode", 0, 0, trancode, 0 );
+		WriteLog( ERR_LVL, "Comm_AcCall ERR" );
+		strcpy( err_code, "99999" );
+		app_err_no=99999;
+		strcpy( err_msg, "Comm_AcCall ERR");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	WriteLog( ERR_LVL, "recv[%s]", PkgBuff.DataBuff);
+
+	if( strncmp( trancode, "CBS1004110", 10 ) == 0 )
+	{
+		memset(param, 0, sizeof(param) );
+		sprintf(param, "P|700|730008", trancode );
+	}
+	else if( strncmp( trancode, "CBS1004100", 10 ) == 0 )
+	{
+		memset(param, 0, sizeof(param) );
+		sprintf(param, "P|700|730012", trancode );
+	}
+	else if( strncmp( trancode, "CBS0001100", 10 ) == 0 )
+    {
+        memset(param, 0, sizeof(param) );
+        strcpy(param, "P|700|730021");
+    }
+	else if( strncmp( trancode, "CBS9010010", 10 ) == 0 )
+    {
+        memset(param, 0, sizeof(param) );
+        strcpy(param, "P|700|730027");
+    }
+	else
+	{
+		PutPoolDataByName( "PBSYS", "RTranCode", 0, 0, trancode, 0 );
+		WriteLog( ERR_LVL, "交易码错误" );
+		strcpy( err_code, "99999" );
+		app_err_no=99999;
+		strcpy( err_msg, "交易码错误");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	if(Data_Unpack( param ) != 0)
+	{
+		PutPoolDataByName( "PBSYS", "RTranCode", 0, 0, trancode, 0 );
+		WriteLog( ERR_LVL, "Data_Unpack ERR" );
+		strcpy( err_code, "99999" );
+		app_err_no=99999;
+		strcpy( err_msg, "Data_Unpack ERR");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	GetPoolDataByName( "SMS2", "resultcode", 0, 0, retcode, 0 );
+	GetPoolDataByName( "SMS2", "resultinfo", 0, 0, retmsg, 0 );
+	if( strncmp( retcode, "000", 3) != 0 )
+	{
+		PutPoolDataByName( "PBSYS", "RTranCode", 0, 0, trancode, 0 );
+		WriteLog( ERR_LVL, "短信平台 ERR" );
+		strcpy( err_code, "99999" );
+		app_err_no=99999;
+		strcpy( err_msg, "Data_Unpack ERR");
+		i=0;
+		if( ((char*)strstr((char *)retmsg,"外围签约信息校验失败")) != NULL)
+		{
+			i=22;
+		}
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, retmsg+i, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	if( strncmp( trancode, "CBS1004110", 10 ) == 0 )
+	{
+		PutPoolDataByName( "RCBIB", "bookDt", 0, 0, trandate , 0);
+		PutPoolDataByName( "RCBIB", "hostSeqNb", 0, 0, seqno , 0);
+	}
+	else if( strncmp( trancode, "CBS0001100", 10 ) == 0 )
+    {
+        strcpy(sstat,"0");
+        PutPoolDataByName( "RCBIB", "flag", 0, 0, sstat , 0);
+        PutPoolDataByName( "PBSYS", "RTranCode", 0, 0, trancode, 0 );
+    }
+	else if( strncmp( trancode, "CBS9010010", 10 ) == 0 )
+    {
+        strcpy(sstat,"0");
+        PutPoolDataByName( "RCBIB", "flag", 0, 0, sstat , 0);
+        PutPoolDataByName( "PBSYS", "RTranCode", 0, 0, trancode, 0 );
+    }
+	else if( strncmp( trancode, "CBS1004100", 10 ) == 0 )
+	{
+		GetPoolDataByName( "SMS2", "countid", 0, 0, signAcc, 0);
+		rtrim(signAcc);
+		i=0;
+		while( strlen( signAcc ) != 0 )
+		{
+			memset( signAcc, 0, sizeof( signAcc ) );
+			memset( signPhone, 0, sizeof( signPhone ) );
+			memset( packid, 0, sizeof( packid ) );
+			memset( servicedate, 0, sizeof( servicedate ) );
+			memset( status, 0, sizeof( status ) );
+			memset( netid, 0, sizeof( netid ) );
+			memset( opennetid, 0, sizeof( opennetid ) );
+
+			GetPoolDataByName( "SMS2", "countid", i, i, signAcc, 0);
+			GetPoolDataByName( "SMS2", "address", i, i, signPhone, 0);
+			GetPoolDataByName( "SMS2", "packid", i, i, packid, 0);
+			GetPoolDataByName( "SMS2", "servicedate", i, i, servicedate, 0);
+			GetPoolDataByName( "SMS2", "status", i, i, status, 0);
+			GetPoolDataByName( "SMS2", "netid", i, i, netid, 0);
+			GetPoolDataByName( "SMS2", "opennetid", i, i, opennetid, 0);
+			rtrim( signAcc );
+			rtrim( signPhone );
+			rtrim( packid );
+			rtrim( servicedate );
+			rtrim( status );
+			rtrim( netid );
+			rtrim( opennetid );
+			PutPoolDataByName( "RCBIB", "acct", 0, i, signAcc, 0);
+			PutPoolDataByName( "RCBIB", "backup1", 0, i, signPhone, 0);
+			PutPoolDataByName( "RCBIB", "feeTyp", 0, i, packid, 0);
+			PutPoolDataByName( "RCBIB", "tranDate", 0, i, servicedate, 0);
+			PutPoolDataByName( "RCBIB", "tranBrchID", 0, i, netid, 0);
+			PutPoolDataByName( "RCBIB", "flag", 0, i, status, 0);
+
+			i++;
+		}
+		i--;
+		GetPoolDataByName( "SMS2", "currentsize", 0, 0, currentsize, 0);
+		rtrim( currentsize );
+		PutPoolDataByName( "RCBIB", "turnPageTotalQnt", 0, 0, currentsize, 0);
+		sprintf( tmp, "%d", i );
+		WriteLog( ERR_LVL, "========tmp[%s]i[%d]========", tmp, i );
+		PutPoolDataByName( "BUSIIB", "v", 0, 0, tmp, 0);
+	}
+	PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "0", 0 );
+	return 0;
+}
+long
+Card_Send_Msg_before(char *para)
+{
+	char seqno[11], timestmp[14+1],signAcc[33],signPhone[129];
+	char accno[33],accnm[129],paperno[25],papertype[2],trancode[40+1];
+	char err_code[10], err_msg[100],oprtyp[2],size[5],inst_no[40+1],trl_no[6+1],msg[513];
+	time_t local_time = 0;
+	struct tm *tm_time = NULL;
+	long app_err_no=0;
+	unsigned char *p,*p1;
+
+	memset( seqno, 0, sizeof(seqno) );
+	memset( timestmp, 0, sizeof(timestmp) );
+	memset( signAcc, 0, sizeof(signAcc) );
+	memset( signPhone, 0, sizeof(signPhone) );
+	memset( accno, 0, sizeof(accno) );
+	memset( accnm, 0, sizeof(accnm) );
+	memset( paperno, 0, sizeof(paperno) );
+	memset( papertype, 0, sizeof(papertype) );
+	memset( err_code, 0, sizeof(err_code) );
+	memset( err_msg, 0, sizeof(err_msg) );
+	memset( trancode, 0, sizeof(trancode) );
+	memset( oprtyp, 0, sizeof(oprtyp) );
+	memset( size, 0, sizeof(size) );
+	memset( inst_no, 0, sizeof(inst_no) );
+	memset( trl_no, 0, sizeof(trl_no) );
+	memset( msg, 0, sizeof(msg) );
+
+	GetPoolDataByName( "PBSYS", "RTranCode", 0, 0, trancode, 0 );
+	rtrim( trancode );
+	GetPoolDataByName( "BUSIIB", "hostSeqNb", 0, 0, seqno, 0);
+	rtrim(seqno);
+
+	PutPoolDataByName( "SMS2", "tempcode", 0, 0, seqno, 0);
+	PutPoolDataByName( "SMS2", "netid", 0, 0, "9909", 0);
+	PutPoolDataByName( "SMS2", "transchannel", 0, 0, "06", 0);
+	local_time = time((time_t *)0);
+	tm_time = localtime(&local_time);
+	strftime(timestmp, sizeof(timestmp), "%Y%m%d%H%M%S", tm_time);
+	PutPoolDataByName("SMS2", "timestamp", 0, 0, timestmp, 0);
+	PutPoolDataByName( "SMS2", "packid", 0, 0, "1", 0);
+	PutPoolDataByName( "SMS2", "tempcode", 0, 0, "9999", 0);
+	PutPoolDataByName( "SMS2", "srcbranch", 0, 0, "9909", 0);
+	PutPoolDataByName( "SMS2", "netid", 0, 0, "9909", 0);
+	PutPoolDataByName( "SMS2", "transcommand", 0, 0, "9909", 0);
+	PutPoolDataByName( "SMS2", "srcsystem", 0, 0, "14", 0);
+
+
+	if( strncmp( trancode, "CBS9010010", 10 ) == 0 )
+    {
+		p=p1=PkgBuff.DataBuff;
+		if((p=(unsigned char*)strstr((char *)PkgBuff.DataBuff,"<use>")) != NULL)
+		{
+			if((p1=(unsigned char*)strstr((char *)PkgBuff.DataBuff,"</use>")) != NULL)
+			{
+				memcpy(msg,p+5,p1-p-5);
+				PutPoolDataByName( "SMS2", "msg", 0, 0, msg, 0);
+			}
+		}
+	}
+	GetPoolDataByName( "RCBIB", "acct", 0, 0, signAcc, 0);
+	if( (strncmp( trancode, "CBS0001100", 10 ) == 0) ||  (strncmp( trancode, "CBS9010010", 10 ) == 0) )
+	{
+		memset( signAcc, 0x00, sizeof(signAcc) );
+		GetPoolDataByName( "BUSIIB", "payCardAcctNb", 0, 0, signAcc, 0);
+	}
+	rtrim(signAcc);
+	if((strlen(signAcc) !=0 ) && AccQryPub5711( signAcc ) != 0 )
+	{
+		WriteLog( ERR_LVL, "调用5711错" );
+		strcpy( err_code, "99999" );
+		app_err_no=99999;
+		strcpy( err_msg, "查询签约账号出错");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	GetPoolDataByName( "CBS", "OpenInstNo", 0, 0, inst_no, 0);
+	if( strlen(signAcc) ==0 )
+	{
+		memset(inst_no, 0, sizeof(inst_no));
+		GetPoolDataByName( "BUSIIB", "openBrchID", 0, 0, inst_no, 0);
+	}
+	else
+	{
+		GetPoolDataByName( "CBS", "CustName", 0, 0, accnm, 0);
+		rtrim(accnm);
+		PutPoolDataByName( "BUSIIB", "custNm", 0, 0, accnm, 0);
+		GetPoolDataByName( "CBS", "AcctStat", 0, 0, paperno, 0);
+		rtrim(paperno);
+		GetPoolDataByName( "CBS", "distflag", 0, 0, papertype, 0);
+		rtrim(papertype);
+	}
+	rtrim(inst_no);
+	strcpy(trl_no,inst_no);
+	strcat(trl_no,"99");
+	if( strncmp( trancode, "CBS0001100", 10 ) == 0 )
+    {
+        PutPoolDataByName( "SMS2", "tempcode", 0, 0, "1402", 0);
+        PutPoolDataByName( "SMS2", "srcbranch", 0, 0, inst_no, 0);
+        PutPoolDataByName( "SMS2", "srcsystem", 0, 0, "14", 0);
+        PutPoolDataByName( "SMS2", "protocol", 0, 0, "C200", 0);
+        return 0;
+    }
+	else if( strncmp( trancode, "CBS9010010", 10 ) == 0 )
+    {
+        PutPoolDataByName( "SMS2", "tempcode", 0, 0, "1401", 0);
+        PutPoolDataByName( "SMS2", "srcbranch", 0, 0, inst_no, 0);
+        PutPoolDataByName( "SMS2", "srcsystem", 0, 0, "14", 0);
+        PutPoolDataByName( "SMS2", "protocol", 0, 0, "C200", 0);
+
+        GetPoolDataByName( "RCBIB", "bookCustTel", 0, 0, signPhone, 0);
+		rtrim( signPhone );
+        PutPoolDataByName( "SMS2", "address", 0, 0, signPhone, 0);
+
+        return 0;
+    }
+	return 0;
+
+}
+long 
+Data_Card_Send(char *para)
+{
+	char err_code[10], err_msg[100], trancode[40+1];
+	char param[100+1],retcode[11],retmsg[101];
+	char signAcc[33],signPhone[129],packid[11],servicedate[11];
+	char status[3],netid[11],opennetid[11];
+	char tmp[256+1],currentsize[11];
+	char trandate[8+1],seqno[11],sstat[2];
+	char tmptrancode[41],oseqnb[17];
+	int i=0;
+	long app_err_no=0;
+
+	memset( err_code, 0, sizeof(err_code) );
+	memset( err_msg, 0, sizeof(err_msg) );
+	memset( trancode, 0, sizeof(trancode) );
+	memset( param, 0, sizeof( param ) );
+	memset( retcode, 0, sizeof( retcode ) );
+	memset( retmsg, 0, sizeof( retmsg ) );
+	memset( signAcc, 0, sizeof( signAcc ) );
+	memset( signPhone, 0, sizeof( signPhone ) );
+	memset( packid, 0, sizeof( packid ) );
+	memset( servicedate, 0, sizeof( servicedate ) );
+	memset( status, 0, sizeof( status ) );
+	memset( netid, 0, sizeof( netid ) );
+	memset( opennetid, 0, sizeof( opennetid ) );
+	memset( tmp, 0, sizeof( tmp ) );
+	memset( currentsize, 0, sizeof( currentsize ) );
+	memset( trandate, 0, sizeof( trandate ) );
+	memset( seqno, 0, sizeof( seqno ) );
+	memset( sstat, 0, sizeof( sstat ) );
+	memset( tmptrancode, 0, sizeof( tmptrancode ) );
+	memset( oseqnb, 0, sizeof( oseqnb ) );
+
+	GetPoolDataByName( "BUSIIB", "hostSeqNb", 0, 0, seqno, 0);
+	PayGetCoreDate( trandate);
+	GetPoolDataByName( "PBSYS", "RTranCode", 0, 0, trancode, 0 );
+	rtrim( trancode );
+	if( strncmp( trancode, "CBS0001100", 10 ) == 0 )
+    {
+        sprintf(param, "P|700|730018" );
+        strcpy(sstat,"1");
+        PutPoolDataByName( "RCBIB", "flag", 0, 0, sstat , 0);
+        strcpy(tmptrancode,"C200");
+        PutPoolDataByName( "PBSYS", "RTranCode", 0, 0, tmptrancode, 0 );
+    }
+	else if( strncmp( trancode, "CBS9010010", 10 ) == 0 )
+    {
+        sprintf(param, "P|700|730024" );
+        strcpy(sstat,"1");
+        PutPoolDataByName( "RCBIB", "flag", 0, 0, sstat , 0);
+        strcpy(tmptrancode,"C200");
+        PutPoolDataByName( "PBSYS", "RTranCode", 0, 0, tmptrancode, 0 );
+        GetPoolDataByName( "RCBIB", "thmseqNb", 0, 0, oseqnb, 0 );
+		rtrim( oseqnb );
+        PutPoolDataByName( "RCBIB", "seqNb", 0, 0, oseqnb, 0 );
+    }
+	else
+	{
+		WriteLog( ERR_LVL, "交易码错误" );
+		strcpy( err_code, "99999" );
+		app_err_no=99999;
+		strcpy( err_msg, "交易码错误");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	if( Data_Pack( param ) != 0 )
+	{
+		WriteLog( ERR_LVL, "短信平台打包失败" );
+		strcpy( err_code, "99999" );
+		app_err_no=99999;
+		strcpy( err_msg, "处理失败,请稍后再试");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	MsgFlagHandleNew("700", 'S', "3");
+	Data_GetTraceCode("700");
+
+	if( Comm_AcCall( "700003|912348" ) != 0 )
+	{
+		WriteLog( ERR_LVL, "Comm_AcCall ERR" );
+		strcpy( err_code, "99999" );
+		app_err_no=99999;
+		strcpy( err_msg, "Comm_AcCall ERR");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	WriteLog( ERR_LVL, "recv[%s]", PkgBuff.DataBuff);
+
+	if( strncmp( trancode, "CBS0001100", 10 ) == 0 )
+    {
+        memset(param, 0, sizeof(param) );
+        strcpy(param, "P|700|730021");
+    }
+	else if( strncmp( trancode, "CBS9010010", 10 ) == 0 )
+    {
+        memset(param, 0, sizeof(param) );
+        strcpy(param, "P|700|730027");
+    }
+	else
+	{
+		WriteLog( ERR_LVL, "交易码错误" );
+		strcpy( err_code, "99999" );
+		app_err_no=99999;
+		strcpy( err_msg, "交易码错误");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	if(Data_Unpack( param ) != 0)
+	{
+		WriteLog( ERR_LVL, "Data_Unpack ERR" );
+		strcpy( err_code, "99999" );
+		app_err_no=99999;
+		strcpy( err_msg, "Data_Unpack ERR");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	GetPoolDataByName( "SMS2", "resultcode", 0, 0, retcode, 0 );
+	GetPoolDataByName( "SMS2", "resultinfo", 0, 0, retmsg, 0 );
+	if( strncmp( retcode, "000", 3) != 0 )
+	{
+		WriteLog( ERR_LVL, "短信平台 ERR" );
+		strcpy( err_code, "99999" );
+		app_err_no=99999;
+		strcpy( err_msg, "Data_Unpack ERR");
+		i=0;
+		if( ((char*)strstr((char *)retmsg,"外围签约信息校验失败")) != NULL)
+		{
+			i=22;
+		}
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, retmsg+i, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	else if( strncmp( trancode, "CBS0001100", 10 ) == 0 )
+    {
+        strcpy(sstat,"0");
+        PutPoolDataByName( "RCBIB", "flag", 0, 0, sstat , 0);
+        PutPoolDataByName( "PBSYS", "RTranCode", 0, 0, trancode, 0 );
+    }
+	else if( strncmp( trancode, "CBS9010010", 10 ) == 0 )
+    {
+        strcpy(sstat,"0");
+        PutPoolDataByName( "RCBIB", "flag", 0, 0, sstat , 0);
+        PutPoolDataByName( "PBSYS", "RTranCode", 0, 0, trancode, 0 );
+    }
+	PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "0", 0 );
+	return 0;
+}

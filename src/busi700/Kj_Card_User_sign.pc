@@ -1,0 +1,571 @@
+/*****************************************************
+**函数描述     : 支付宝卡通签约管理 
+**函数用途     : 快捷签约原子交易 
+**输入         ：
+**输出         : 
+**创建日期     ：2011/05/09
+**最后修改日期 ：
+**Create by    : Archer
+*****************************************************/
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <time.h>
+#include "pbconstval.h"
+#include "pbstructdef.h"
+#ifdef ORACLE_DATABASE
+EXEC SQL include "pbranchdb.h";
+#else
+#include "pbranchdb.h"
+#endif
+#include "pberrlog.h"
+#include "pbglbvardef.h"
+#include "pbbasefunc.h"
+
+EXEC SQL  include "PAGT.h";
+#define ERROUT(msg) WriteLog(ERR_LVL,msg );\
+	PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, msg,0);
+
+/*add by xxj 20150320 for 统一支付信息同步 BEGIN*/
+int SyncSigninfo( struct s_pagt_signinfo *signInfo );
+/*add by xxj 20150320 for 统一支付信息同步 END */
+
+
+int
+Kj_Card_User_sign()
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+	struct s_pagt_signinfo sign_info;
+	struct s_pagt_signinfo_jnl sign_info_jnl;
+	char   chnl[2+1]; 
+	EXEC SQL END DECLARE SECTION;
+
+	int     ret = 0;
+	long 	core_err;
+	char 	err_msg[40+1];
+	long	hoststat;
+	long    host_stat=0;
+	char 	RetCode[8+1];
+	char 	buffer[40+1];					/* 5712传入报文 */
+	char    stat[1+1];
+	char    ff[1+1];
+	char    type[1+1];
+	long	app_err_no = -1;
+
+	memset( buffer,0,sizeof(buffer) );
+	memset( stat,0,sizeof(stat) );
+	memset( ff,0,sizeof(ff) );
+	memset ( err_msg, 0, sizeof ( err_msg ) );
+	memset( &sign_info, 0x00, sizeof( struct s_pagt_signinfo ));
+	memset( &sign_info_jnl, 0x00, sizeof( struct s_pagt_signinfo_jnl ));
+    memset( chnl, 0, sizeof(chnl) );
+    memset( type, 0, sizeof(type) );
+    memset( RetCode, 0, sizeof(RetCode) );
+
+
+	/* 从变量池取值 */
+	GetPoolDataByName("CARDCURIB","certType",0,0,sign_info.cert_type,0);
+	GetPoolDataByName("CARDCURIB","certNo",0,0,sign_info.cert_no,0);
+	GetPoolDataByName("CARDCURIB","webNo",0,0,sign_info.prsn_no,0);
+	GetPoolDataByName("CARDCURIB","cardNo",0,0,sign_info.acc,0);
+	GetPoolDataByName("CARDCURIB","cardNo",0,0,sign_info.signacc,0);
+	GetPoolDataByName("CARDCURIB","name",0,0,sign_info.name,0);
+	GetPoolDataByName("CARDCURIB","cell",0,0,sign_info.signinfo1,0);
+	GetPoolDataByName("CARDCURIB","channel",0,0,sign_info.signinfo4,0);
+	GetPoolDataByName("CARDCURIB","channel",0,0,sign_info.signinfo5,0);
+	GetPoolDataByName("CARDCURIB","state",0,0,stat,0);
+
+	Trim( sign_info.cert_type );
+	Trim( sign_info.batchno );
+	Trim( sign_info.cert_no );
+	Trim( sign_info.prsn_no );
+	Trim( sign_info.acc );
+	Trim( sign_info.signacc );
+	Trim( sign_info.name );
+	Trim( sign_info.signinfo1 );
+	Trim( sign_info.signinfo2 );
+	Trim( sign_info.signinfo3 );
+	Trim( sign_info.signinfo4 );
+	Trim( sign_info.signinfo5 );
+	
+
+	/* 给流水表结构体赋值 */
+	GetPoolDataByName("CARDCURIB","certType",0,0,sign_info_jnl.cert_type,0);
+	GetPoolDataByName("CARDCURIB","certNo",0,0,sign_info_jnl.cert_no,0);
+	GetPoolDataByName("CARDCURIB","webNo",0,0,sign_info_jnl.prsn_no,0);
+	GetPoolDataByName("CARDCURIB","cardNo",0,0,sign_info_jnl.acc,0);
+	GetPoolDataByName("CARDCURIB","cardNo",0,0,sign_info_jnl.signacc,0);
+	GetPoolDataByName("CARDCURIB","name",0,0,sign_info_jnl.name,0);
+	GetPoolDataByName("CARDCURIB","cell",0,0,sign_info_jnl.signinfo1,0);
+	GetPoolDataByName("CARDCURIB","email",0,0,sign_info_jnl.signinfo2,0);
+	GetPoolDataByName("CARDCURIB","channel",0,0,sign_info_jnl.signinfo4,0);
+	GetPoolDataByName("CARDCURIB","channel",0,0,sign_info_jnl.signinfo5,0);
+	
+	Trim( sign_info_jnl.cert_type );
+	Trim( sign_info_jnl.batchno );
+	Trim( sign_info_jnl.cert_no );
+	Trim( sign_info_jnl.prsn_no );
+	Trim( sign_info_jnl.acc );
+	Trim( sign_info_jnl.signacc );
+	Trim( sign_info_jnl.name );
+	Trim( sign_info_jnl.signinfo1 );
+	Trim( sign_info_jnl.signinfo2 );
+	Trim( sign_info_jnl.signinfo3 );
+	Trim( sign_info_jnl.signinfo4 );
+	Trim( sign_info_jnl.signinfo5 );
+
+	/* 客户信息验证 */
+	core_err = 0;
+	if( strlen(sign_info.cert_type) == 0 )	
+	{
+		WriteLog(ERR_LVL,"证件类型不能为空!\n");
+		core_err = 45025;
+    	strcpy( err_msg, "用户信息不正确" );
+       	PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+       	PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+		return( -1 );	
+	}
+	if( sign_info.cert_type[0] != '1' )
+	{
+		WriteLog(ERR_LVL,"证件类型必须为身份证!\n");
+		core_err = 45025;
+       	strcpy( err_msg, "不支持的证件类型" );
+       	PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+       	PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+		return( -1 );	
+	}
+	strcpy(type,"0");
+	if( strlen(sign_info.cert_no) == 0 )	
+	{
+		WriteLog(ERR_LVL,"证件号码不能为空!\n");
+		core_err = 45026;
+       	strcpy( err_msg, "证件号码格式错误" );
+       	PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+       	PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+		return( -1 );	
+	}
+	if( strlen(sign_info.name) == 0 )	
+	{
+		WriteLog(ERR_LVL,"客户姓名不能为空!\n");
+		core_err = 45020;
+       	strcpy( err_msg, "银行卡户名不存在" );
+       	PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+       	PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+		return( -1 );	
+	}
+	if( strlen(sign_info.prsn_no) == 0 )	
+	{
+		WriteLog(ERR_LVL,"卡通签约协议号不能为空!\n");
+		core_err = 45021;
+       	strcpy( err_msg, "卡通签约协议号不能为空" );
+       	PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+       	PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+		return( -1 );	
+	}
+	if( strlen(sign_info.acc) == 0 )	
+	{
+		WriteLog(ERR_LVL,"卡号不能为空!\n");
+		core_err = 45021;
+       	strcpy( err_msg, "银行卡卡号不存在" );
+       	PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+       	PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+		return( -1 );	
+	}
+	if( stat[0] == '0' )
+	{
+		if( strlen(sign_info.signinfo1) == 0 )	
+		{
+			WriteLog(ERR_LVL,"移动电话不能为空!\n");
+			core_err = 35001;
+       		strcpy( err_msg, "用户信息不正确" );
+       		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+       		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+			return( -1 );	
+		}
+	
+	}	
+    ret = ct_GetParaContent( "NCS", "kj_dayamt_limt", sign_info.signinfo7);
+    if ( ret <0)
+    {
+         strcpy( err_msg, "取快捷当日限额失败");
+         WriteLog( ERR_LVL, "取当日限额失败");
+         core_err = 99999;
+         PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char*)&core_err, 0);
+         PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0);
+         return( -1);
+    }
+    ret = ct_GetParaContent( "NCS", "kj_signamt_limt", sign_info.signinfo6);
+    if ( ret <0)
+    {
+        strcpy( err_msg, "取快捷单笔限额失败");
+        WriteLog( ERR_LVL, "取单笔限额失败");
+        core_err = 99999;
+        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char*)&core_err, 0);
+        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0);
+        return( -1);
+     }
+ 
+
+	/* 调核心5712交易 进行用户信息检查 */
+     if( stat[0] == '0' )  /*签约*/
+     {
+	/**96快捷渠道 需要效验手机号*/
+	     if(strcmp(sign_info.signinfo4,"96")==0)
+                /***modify by luozha 20131015 置cardflag[20]=0,cardflag[21]=0 begin***/
+	        sprintf( buffer,"1110011110010111010000011111101000000000" );
+                /***modify by luozha 20131015 end***/
+	     else /*99,98,97渠道*/
+	    {
+	        WriteLog(ERR_LVL,"渠道非法!\n");
+			core_err = 99999;
+       		strcpy( err_msg, "渠道非法" );
+       		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+       		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+			return( -1 );	
+		 }
+	 }
+
+    PutPoolDataByName("ABSHEAD", "_tx_code", 0, 0,"5712" , 0);
+    PutPoolDataByName("ABSHEAD", "_tlr_no", 0, 0, "888889", 0);
+    PutPoolDataByName("ABSHEAD", "organ_no", 0, 0,  "9996", 0);
+    PutPoolDataByName( "ABSHEAD", "_tx_op_stat", 0, 0, "N" , 0 );
+    PutPoolDataByName( "ABSHEAD", "chnl_no", 0, 0, "6", 0);
+	PutPoolDataByName( "ABSHEAD", "_host_stat", 0, 0, &host_stat, 0);
+
+    PutPoolDataByName ( "CBS", "TxFlag", 0, 0, sign_info.acc, 0);  /*卡号*/
+    PutPoolDataByName ( "CBS", "OutAccName", 0, 0, buffer, 0);
+    PutPoolDataByName ( "CBS", "PaperId", 0, 0, type, 0);
+    PutPoolDataByName ( "CBS", "PaperNo", 0, 0, sign_info.cert_no, 0);
+    PutPoolDataByName ( "CBS", "Phone", 0, 0, sign_info.signinfo1, 0);
+    PutPoolDataByName ( "CBS", "CustName", 0, 0, sign_info.name, 0);
+
+    WriteLog(DEBUG_LVL0, "=============FML打包===============");
+    ret = Data_PackFml("110|5712|0");
+    if ( ret )
+    {
+         WriteLog(ERR_LVL,"ERROR: FML打包错: %d\n", ret);
+		 ERROUT("FML打包错" );
+		 core_err = 99999;
+		 PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char*)&core_err, 0);
+		 PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+ 		 return ( -1);
+    }
+    WriteLog(DEBUG_LVL0, "=============与核心通讯===============");
+    ret = Comm_AcCallFmlAndUnpack("110|PBSVC|5712|1");
+    if( ret )
+    {
+        WriteLog(ERR_LVL,"ERROR: FML解包错: %d\n", ret);
+		ERROUT("FML解包错" );
+		core_err = 99999;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char*)&core_err, 0);
+		PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+        return -1;
+    }
+	GetPoolDataByName( "ABSHEAD", "_host_stat", 0, 0, &hoststat, 0 );
+	if ( hoststat != 0 )
+	{
+		GetPoolDataByName("ABSHEAD", "app_err_no", 0, 0, &app_err_no, 0);
+		sprintf(RetCode, "%ld", app_err_no);
+		rtrim(RetCode);
+		if ( hoststat == -1 )
+		{
+			WriteLog( DEBUG_LVL0, "通讯超时:[%s]", err_msg );
+			ERROUT("通讯超时" );
+			core_err = 99999;
+		    PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char*)&core_err, 0);
+			PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+        	return -1;
+		}
+		else
+		{
+    		if ( strcmp(RetCode,"-507")==0)
+    		{
+        		WriteLog ( ERR_LVL, "该卡已处于销卡状态[%s]", sign_info.acc);
+				core_err = 45032;
+        		strcpy( err_msg, "该卡已处于销卡状态" );
+        		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+        		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+				PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+				return ( -1);
+    		}
+    		if ( strcmp(RetCode,"-528")==0)
+    		{
+        		WriteLog ( ERR_LVL, "账户已冻结[%s]", sign_info.acc);
+				core_err = 45033;
+        		strcpy( err_msg, "账户已冻结" );
+        		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+        		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+				PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+				return ( -1);
+    		}
+    		if ( strcmp(RetCode,"-509")==0)
+    		{
+        		WriteLog ( ERR_LVL, "账户已挂失[%s]", sign_info.acc);
+				core_err = 45034;
+        		strcpy( err_msg, "账户已挂失" );
+        		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+        		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+				PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+				return ( -1);
+    		}
+    		if ( strcmp(RetCode,"-527")==0)
+    		{
+        		WriteLog ( ERR_LVL, "银行卡卡号不存在[%s]", sign_info.acc);
+				core_err = 45021;
+        		strcpy( err_msg, "银行卡卡号不存在" );
+        		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+        		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+				PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+				return ( -1);
+    		}
+    		if ( strcmp(RetCode,"-630")==0)
+    		{
+        		WriteLog ( ERR_LVL, "证件号码不一致[%s]", sign_info.cert_no);
+				core_err = 45028;
+        		strcpy( err_msg, "与登记证件号码不匹配" );
+        		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+        		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+				PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+				return ( -1);
+    		}
+    		if ( strcmp(RetCode,"-631")==0)
+   			{
+        		WriteLog ( ERR_LVL, "客户姓名不一致[%s]", sign_info.name);
+				core_err = 45022;
+        		strcpy( err_msg, "户名与银行卡号不匹配" );
+        		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+        		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+				PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+				return ( -1);
+    		}
+    		if (strcmp(RetCode,"-632")==0)
+    		{
+        		WriteLog ( ERR_LVL, "手机号码不一致[%s]", sign_info.signinfo1);
+				core_err = 45030;
+        		strcpy( err_msg, "手机号码不符" );
+        		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+        		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+				PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+				return ( -1);
+    		}
+    		if (strcmp(RetCode,"-633" )==0)
+    		{
+        		WriteLog ( ERR_LVL, "单位卡不能进行签约[%s]", sign_info.acc);
+				core_err = 45024;
+        		strcpy( err_msg, "不支持的银行卡号" );
+        		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+        		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+				PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+				return ( -1);
+    		}
+    		if (strcmp(RetCode,"-634" )==0)
+    		{
+        		WriteLog ( ERR_LVL, "未登记手机号码[%s]", sign_info.acc);
+				core_err = 45029;
+        		strcpy( err_msg, "未登记手机号码" );
+        		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+        		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+				PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+				return ( -1);
+    		}
+			else
+			{
+                GetPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg,0 );
+			    ERROUT(err_msg );
+			    core_err = 45031;
+	            PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char*)&core_err, 0); 
+			   return ( -1 );
+			}
+		}
+	}
+	/* 取系统日期、项目编号 */
+	ret = PayGetPbDate( sign_info.signdate );
+	if( ret < 0 )
+	{
+		WriteLog(ERR_LVL,"取PB日期失败!\n");
+		ERROUT("取会计时间失败" );
+		core_err = 99999;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char*)&core_err, 0);
+		PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+		return( -1 );	
+	}
+
+	dtcurrent( &sign_info.signtime );
+	dtcurrent( &sign_info.modtime );
+	sign_info_jnl.signtime=sign_info.signtime;
+	sign_info_jnl.modtime=sign_info.modtime;
+
+	EXEC SQL SELECT content INTO :sign_info.batchno
+		FROM t_pay_sys_para
+		WHERE inst_no = 'NCS'
+		AND data_code = 'Batchno';
+	if( SQLCODE != 0)
+	{
+		WriteLog(ERR_LVL,"取项目编号失败![%d]",SQLCODE);
+		ERROUT("数据库错" );
+		core_err = 99999;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char*)&core_err, 0);
+		PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+		return( -1 );	
+	}
+	/* 取交易流水号 */
+	GetPoolDataByName( "ABSHEAD", "_seq_no", 0, 0, sign_info_jnl.seqno, 0);
+	strcpy( sign_info_jnl.signdate,sign_info.signdate );
+	strcpy( sign_info_jnl.trandate,sign_info.signdate );
+	strcpy( sign_info_jnl.batchno,sign_info.batchno );
+
+
+	/* 判断签约解约标志，更新数据 */	
+	if( stat[0] == '0')		/**签约**/	
+	{ 
+		sign_info_jnl.signflag[0] = '1';
+		/* 插签约流水表 */
+		EXEC SQL INSERT INTO t_pagt_signinfo_jnl VALUES ( :sign_info_jnl );
+		if( sqlca.sqlcode )
+		{
+			WriteLog ( ERR_LVL, "插入签约流水表失败![%d]",sqlca.sqlcode );
+			ERROUT("插签约流水数据库错" );
+			core_err = 99999;
+		    PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char*)&core_err, 0);
+			PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+			return( -1 );	
+		}	
+		/* 更新签约信息表 */
+		EXEC SQL SELECT signflag,signinfo4[1,2] INTO :sign_info.signflag,:chnl
+		FROM t_pagt_signinfo
+		WHERE batchno = :sign_info.batchno
+		AND prsn_no = :sign_info.prsn_no;
+		if( sqlca.sqlcode )
+		{
+			if( sqlca.sqlcode==SQLNOTFOUND )
+			{
+			 WriteLog( ERR_LVL,"客户签约信息表无对应记录![%d]",sqlca.sqlcode);
+			 ff[0]='1';
+			 sign_info.signflag[0] = '1';
+			/*add by xxj 20150320 for统一支付信息同步 BEGIN*/
+			if( SyncSigninfo(&sign_info) != 0 )
+			{
+				WriteLog( ERR_LVL,"统一支付信息同步错");
+				core_err = 99999;
+				ERROUT("处理失败");
+				PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char*)&core_err, 0);
+				PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+				return( -1 );
+			}
+			/*add by xxj 20150320 for统一支付信息同步 END */
+
+			 EXEC SQL INSERT INTO t_pagt_signinfo VALUES (:sign_info);
+			    if ( sqlca.sqlcode )
+				{
+				  WriteLog( ERR_LVL,"插入签约信息表失败[%d]",sqlca.sqlcode);
+				  ERROUT("插签约流水数据库错" );
+				  core_err = 99999;
+				  PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char*)&core_err, 0);
+				  PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+				  return (-1);
+				 }
+			 }
+		 else
+			 {
+			 WriteLog ( ERR_LVL, "查询客户签约信息表失败![%d]",sqlca.sqlcode );
+			 ERROUT("查询客户签约信息失败" );
+			 core_err = 99999;
+			 PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char*)&core_err, 0);
+			 PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+			 return( -1 );	
+			 }	
+		 }
+		if(ff[0]!='1')
+		{
+		  if (sign_info.signflag[0] == '1')
+		  {
+			if (strcmp(chnl,"96")==0 && strcmp(sign_info.signinfo4,"96")==0)
+			{
+			 WriteLog(ERR_LVL,"快捷签约了,再签也允许");
+			 sign_info.signflag[0]='1';
+			/*add by xxj 20150320 for统一支付信息同步 BEGIN*/
+			if( SyncSigninfo(&sign_info) != 0 )
+			{
+				WriteLog( ERR_LVL,"统一支付信息同步错");
+				core_err = 99999;
+				strcpy( err_msg, "处理失败");
+				PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+				PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+				PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+				return( -1 );
+			}
+			/*add by xxj 20150320 for统一支付信息同步 END */
+
+			 EXEC SQL UPDATE t_pagt_signinfo 
+					 SET * = (:sign_info)
+		           	 WHERE batchno = :sign_info.batchno
+		           	 AND prsn_no = :sign_info.prsn_no;
+					if ( sqlca.sqlcode)
+			   		{ 
+			     	WriteLog( ERR_LVL,"更新签约信息表失败[%d]",sqlca.sqlcode);
+			     	core_err = 99999;
+        	        strcpy( err_msg, "更新签约信息表失败" );
+        	        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+        	        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			     	PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+			     	return ( -1);
+			 } 
+			} 
+			else
+			{
+			WriteLog ( ERR_LVL, "该卡已签约卡通业务[%s]", sign_info.acc);
+			core_err = 35003;
+			strcpy( err_msg, "该卡已签约卡通业务" );
+            PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+            PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+			return ( -1);
+			}
+		  }
+		  else 
+		  {
+			sign_info.signflag[0]='1';
+			/*add by xxj 20150320 for统一支付信息同步 BEGIN*/
+			if( SyncSigninfo(&sign_info) != 0 )
+			{
+				WriteLog( ERR_LVL,"统一支付信息同步错");
+				core_err = 99999;
+				strcpy( err_msg, "处理失败");
+				PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+				PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+				PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+				return( -1 );
+			}
+			/*add by xxj 20150320 for统一支付信息同步 END */
+
+		 	EXEC SQL UPDATE t_pagt_signinfo 
+					 SET * = (:sign_info)
+		           	 WHERE batchno = :sign_info.batchno
+		           	 AND prsn_no = :sign_info.prsn_no;
+					if ( sqlca.sqlcode)
+			   		{ 
+			     	WriteLog( ERR_LVL,"更新签约信息表失败[%d]",sqlca.sqlcode);
+			     	core_err = 99999;
+        	        strcpy( err_msg, "更新签约信息表失败" );
+        	        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&core_err, 0 );
+        	        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			     	PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "1", 0 );
+			     	return ( -1);
+			    	}
+		  }
+	    }
+	}
+	
+		
+	 PutPoolDataByName( "CARDCURIB", "stat", 0, 0, "0", 0 );
+	 return(0);
+}
+

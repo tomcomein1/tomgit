@@ -1,0 +1,1989 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <errno.h>
+#include <string.h>
+#include <unistd.h>
+#include <time.h>
+#include "pbconstval.h"
+#include "pbstructdef.h"
+#ifdef ORACLE_DATABASE
+EXEC SQL include "pbranchdb.h";
+#else
+#include "pbranchdb.h"
+#endif
+#include "pberrlog.h"
+#include "pbglbvardef.h"
+#include "pbbasefunc.h"
+#include "pbvarmacro.h"
+EXEC SQL include "pbdb.h";
+#include "fml32.h"
+#include "atmi.h"
+EXEC SQL include "pbsrv.h";
+EXEC SQL include "pbsccin.h";
+
+#define ERREXP( msg ) WriteLog( ERR_LVL, msg );\
+                    PutPoolDataByName( "PBSYS", "SysErrExp", 0, 0, msg, 0 )
+/* 打印建网保证金订单金额单日汇聚凭证指今号 */
+#define BUSI701_PRT_CMD "SCINN701"
+/* 分页条数 */
+#define PAGENO 10
+/* 网银流水表链表 */
+typedef struct dtl_link
+{
+    struct s_pb_net_dtl dtl;
+    struct dtl_link * next;
+} dlink, *pdlink;
+/* 网银6380打印查询 */
+long Wy_Gm_Cert_Search();
+/* 网银6381打印交易 */
+long Wy_Gm_Cert_Prt();
+/* 取柜面上送值到变量 */
+int get_value( char * _tlr_no, char * inst_no, char * tran_date, char * bgn_date, char * end_date, char * acc,
+                char * sccin_no, char * prt_flag, char * yr_flag, long * bgn_rec_no, char * prt_type, 
+                char * chnlseqno, char * btchnb, char * bat_no );
+/* 自贡建网单日凭证打印 */
+int sccin_print( const char * tran_date, const char * inst_no, 
+                 const char * bdate, const char * edate, const char * _tlr_no );
+/* 网银流水表记录赋值到内存 */
+pdlink query_t_pb_net_dtl( const char * sql, const char * yr_flag, const char * tranflag );
+/* 释放记录流水的内存 */
+int freelink( pdlink lhead );
+/* 内存分页处理 */
+pdlink dtl_page_proc( const pdlink pin, unsigned int beginno, unsigned int num, char * flag );
+/* 记账查询  tranflag 638001 - 账务查询 638002 - 手续费查询 638003 - 代发查询 638004 - 代发失败查询 */
+pdlink pub_query( const char * bgn_date, const char * end_date, const char * inst_no, 
+    const char * acc, const char * chnlseqno, const char * yr_flag, 
+    unsigned int beginno, unsigned int num, char * flag, const char * printflag, 
+    const char * seq, const char * btchnb, const char * bat_no, const char * tranflag );
+/*************************/
+/* 记账查询返回处理      */
+/* code:                 */
+/* 638001 - 账务查询     */
+/* 638101 - 账务打印     */
+/* 638002 - 手续费查询   */
+/* 638102 - 手续费打印   */
+/* 638003 - 代发查询     */
+/* 638103 - 代发打印     */
+/* 638004 - 代发失败查询 */
+/* 638104 - 代发失败打印 */
+/*************************/
+int pub_return_proc( const pdlink pout, const char * inst_no, long bgn_rec_no, 
+                        const char * tlr_no, const char * flag, const char * code, 
+                        const char * tran_date );
+/* null 金额转换 */
+void change_amt( char * amt );
+/* 打印次数处理 登记网银流水表backup8字段，记账登记101-107位 手续费登记108-114位 代发登记115-121位 代发失败登记122-128位 */
+int no_proc( const char * ins, int no, char * outs, long * onum );
+/* 取失败代发笔数 */
+long get_batch_num_amt( const pdlink ptmp, const char * tran_date, long * num, double * amt );
+
+/* 网银6380打印查询 */
+long Wy_Gm_Cert_Search()
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+        char _tlr_no[100 + 1]; 
+        char inst_no[100 + 1];
+        char tran_date[100 + 1];
+        char bgn_date[100 + 1];
+        char end_date[100 + 1];
+        char acc[100 + 1];
+        char sccin_no[100 + 1];
+        char prt_type[100 + 1];
+        char chnlseqno[100 + 1];
+        char btchnb[20 + 1];
+        char bat_no[20+1];
+        char prt_flag[100 + 1];
+        char yr_flag[100 + 1];
+        long bgn_rec_no = 0;
+        char flag[100 + 1];
+        char tranflag[100 + 1];
+        char scode[100 + 1];
+    EXEC SQL END DECLARE SECTION;
+    pdlink pret = NULL;
+
+    memset( _tlr_no, 0x00, sizeof(_tlr_no) );
+    memset( inst_no, 0x00, sizeof(inst_no) );
+    memset( tran_date, 0x00, sizeof(tran_date) );
+    memset( bgn_date, 0x00, sizeof(bgn_date) );
+    memset( end_date, 0x00, sizeof(end_date) );
+    memset( acc, 0x00, sizeof(acc) );
+    memset( sccin_no, 0x00, sizeof(sccin_no) );
+    memset( prt_type, 0x00, sizeof(prt_type) );
+    memset( chnlseqno, 0x00, sizeof(chnlseqno) );
+    memset( btchnb, 0x00, sizeof(btchnb) );
+    memset( bat_no, 0x00, sizeof(bat_no) );
+    memset( prt_flag, 0x00, sizeof(prt_flag) );
+    memset( yr_flag, 0x00, sizeof(yr_flag) );
+    memset( flag, 0x00, sizeof(flag) );
+    memset( tranflag, 0x00, sizeof(tranflag) );
+    memset( scode, 0x00, sizeof(scode) );
+    /* 取柜面上送值到变量 */
+    if ( get_value( _tlr_no, inst_no, tran_date, bgn_date, end_date, acc,
+                sccin_no, prt_flag, yr_flag, &bgn_rec_no, prt_type,
+                chnlseqno, btchnb, bat_no ) < 0 )
+    {
+        ERREXP( "get_value error!" );
+        return -1;
+    }
+    if ( strcmp( sccin_no, BUSI701_PRT_CMD ) == 0 )
+    {
+        /* 自贡建网单日凭证打印 直接在6380里面完成 */
+        if ( sccin_print( tran_date, inst_no, bgn_date, end_date, _tlr_no ) < 0 )
+        {
+            ERREXP( "sccin_print error!" );
+            return -1;
+        }
+    }
+    else
+    {
+        /* 其余打印交易在6380里面只查询打印明细，在6381交易里面才打印 */
+        /* 打印类别 */
+        /* 0-记账凭证打印的查询 2-手续费凭证打印的查询 1-代发凭证打印的查询 3-代发失败凭证打印的查询 */
+        if ( prt_type[0] == '0' || prt_type[0] == '2' )
+        {
+            /* 记账和手续费没有代理编号 */
+            memset( btchnb, 0x00, sizeof( btchnb ) );
+            memset( bat_no, 0x00, sizeof( bat_no ) );
+            strcpy( btchnb, "" );
+            strcpy( bat_no, "" );
+        }
+        /* tranflag 638001 - 账务查询 638002 - 手续费查询 638003 - 代发查询 638004 - 代发失败查询 */
+        memset( tranflag, 0x00, sizeof( tranflag ) );
+        if ( prt_type[0] == '0' )
+            strcpy( tranflag, "638001" );
+        if ( prt_type[0] == '2' )
+            strcpy( tranflag, "638002" );
+        if ( prt_type[0] == '1' )
+            strcpy( tranflag, "638003" );
+        if ( prt_type[0] == '3' )
+            strcpy( tranflag, "638004" );
+        /* 查询记账明细到内存 */
+        memset( flag, 0x00, sizeof( flag ) );
+        if ( ( pret = pub_query( bgn_date, end_date, inst_no, 
+             acc, chnlseqno, yr_flag, 
+             bgn_rec_no, PAGENO, flag, "1", "", btchnb, bat_no, tranflag ) ) == NULL )
+        {
+            ERREXP( "pub_query error!" );
+            /* 释放pret */
+            freelink( pret );
+            return -1;
+        }
+        memset( scode, 0x00, sizeof( scode ) );
+        if ( prt_type[0] == '0' )
+        {
+            /* 记账查询返回处理 */
+            strcpy( scode, "638001" );
+        }
+        if ( prt_type[0] == '2' )
+        {
+            /* 手续费查询返回处理 */
+            strcpy( scode, "638002" );
+        }
+        if ( prt_type[0] == '1' )
+        {
+            /* 代发凭证打印返回处理 */
+            strcpy( scode, "638003" );
+        }
+        if ( prt_type[0] == '3' )
+        {
+            /* 代发凭证打印失败返回处理 */
+            strcpy( scode, "638004" );
+        }
+        if ( pub_return_proc( pret, inst_no, bgn_rec_no, _tlr_no, flag, scode, tran_date ) < 0 )
+        {
+            ERREXP( "pub_return_proc error!" );
+            /* 释放pret */
+            freelink( pret );
+            return -1;
+        }
+        /* 释放pret */
+        freelink( pret );
+    }
+    return 0;
+}
+
+/* 取柜面上送值到变量 */
+int get_value( char * _tlr_no, char * inst_no, char * tran_date, char * bgn_date, char * end_date, char * acc,
+                char * sccin_no, char * prt_flag, char * yr_flag, long * bgn_rec_no, char * prt_type, 
+                char * chnlseqno, char * btchnb, char * bat_no )
+{
+    long ret = 0;
+    char s_bgn_rec_no[100 + 1];
+
+    /* 柜员号 */
+    GetPoolDataByName( "ABSHEAD", "_tlr_no", 0, 0, _tlr_no, 0 );
+    trim( _tlr_no );
+    WriteLog( ERR_LVL, "_tlr_no [%s]", _tlr_no );
+    /* 机构号 */
+    GetPoolDataByName( "ABSHEAD", "organ_no", 0, 0, inst_no, 0 );
+    trim( inst_no );
+    WriteLog( ERR_LVL, "inst_no [%s]", inst_no );
+    /* 交易日期 */
+    ret = PayGetPbDate( tran_date );
+    if( ret )
+    {
+        ERREXP( "PayGetPbDate error!" );
+        return -1;
+    }
+    trim( tran_date );
+    WriteLog( ERR_LVL, "tran_date [%s]", tran_date );
+    /* 查询开始日期 */
+    GetPoolDataByName( "PAGTBUF", "bgndate", 0, 0, bgn_date, 0 );
+    trim( bgn_date );
+    WriteLog( ERR_LVL, "bgn_date [%s]", bgn_date );
+    /* 查询结束日期 */
+    GetPoolDataByName( "PAGTBUF", "enddate", 0, 0, end_date, 0 );
+    trim( end_date );
+    WriteLog( ERR_LVL, "end_date [%s]", end_date );
+    /* 卡/账号 */
+    GetPoolDataByName( "PAGTBUF", "accno", 0, 0, acc, 0 );
+    trim( acc );
+    WriteLog( ERR_LVL, "acc [%s]", acc );
+    /* 自贡建网单日打印指令集 */
+    GetPoolDataByName( "PAGTABS", "data15", 0, 0, sccin_no, 0 );
+    trim( sccin_no );
+    WriteLog( ERR_LVL, "sccin_no [%s]", sccin_no );
+    /* 操作标志 */
+    GetPoolDataByName( "PAGTBUF", "area_use_flag", 0, 0, prt_flag, 0 );
+    trim( prt_flag );
+    WriteLog( ERR_LVL, "prt_flag [%s]", prt_flag );
+    /* 打印标志 1-未打印  2-已打印 */
+    GetPoolDataByName( "PAGTBUF", "varflag", 0, 0, yr_flag, 0 );
+    trim( yr_flag );
+    WriteLog( ERR_LVL, "yr_flag [%s]", yr_flag );
+    /* 起始序号 */
+    memset( s_bgn_rec_no, 0x00, sizeof( s_bgn_rec_no ) );
+    GetPoolDataByName( "PAGTBUF", "command", 0, 0, s_bgn_rec_no, 0 );
+    trim( s_bgn_rec_no );
+    *bgn_rec_no = atol( s_bgn_rec_no );
+    WriteLog( ERR_LVL, "bgn_rec_no [%ld]", *bgn_rec_no );
+    /* 非自贡建网 */
+    if ( strcmp( sccin_no, BUSI701_PRT_CMD ) != 0 )
+    {
+        /* 打印类型 0-记账打印 2-手续费打印 1-代发凭证打印 2-代发失败凭证打印 */ 
+        GetPoolDataByName( "PAGTBUF", "ex_flag", 0, 0, prt_type, 0 );
+        trim( prt_type );
+        WriteLog( ERR_LVL, "prt_type [%s]", prt_type );
+        /* 0-记账凭证打印的查询 2-手续费凭证打印的查询 */
+        if ( prt_type[0] == '0' || prt_type[0] == '2' )
+        {
+            /* 渠道流水 */
+            GetPoolDataByName( "PAGTBUF", "data15", 0, 0, chnlseqno, 0 );
+            trim( chnlseqno );
+            WriteLog( ERR_LVL, "chnlseqno [%s]", chnlseqno );
+        }
+        /* 1-代发凭证打印的查询 3-代发失败凭证打印的查询 */
+        if ( prt_type[0] == '1' || prt_type[0] == '3' )
+        {
+            /* 代发打印代理编号 */
+            GetPoolDataByName( "PAGTBUF", "batchno", 0, 0, bat_no, 0 );
+            trim( bat_no );
+            
+            GetPoolDataByName( "PAGTBUF", "data15", 0, 0, btchnb, 0 );
+            trim( btchnb );
+            
+            WriteLog( ERR_LVL, "bat_no[%s] btchnb[%s]", bat_no, btchnb ); 
+        }
+    }
+    return 0;
+}
+
+/* 自贡建网单日凭证打印 */
+int sccin_print( const char * tran_date, const char * inst_no, 
+                 const char * bdate, const char * edate, const char *_tlr_no )
+{
+EXEC SQL BEGIN DECLARE SECTION;
+    long ret = 0;
+    char _seq_no[100 + 1];
+    char txtfile[100 + 1];
+    char dirname[100 + 1];
+    char bgn_date[100 + 1];
+    char end_date[100 + 1];
+    struct payforquatantee payforQuarantee;
+    char outamt[100 + 1];
+    double total_amt = 0.00;
+    long num = 0;
+    char samt[100 + 1];
+    char snum[100 + 1];
+    char sccinacc[100 + 1];
+    char datafile[100 + 1];
+    char fmtfile[100 + 1];
+    char filename[100 + 1];
+    char rptfile[100 + 1];
+EXEC SQL END DECLARE SECTION;
+    FILE *fp = NULL;
+
+    memset( bgn_date, 0, sizeof( bgn_date ) );
+    strcpy( bgn_date, bdate );
+    memset( end_date, 0, sizeof( end_date ) );
+    strcpy( end_date, edate );
+    EXEC SQL declare acc_amt cursor for
+        select * from t_pb_payforQuarantee
+        where intrstbgndt >= :bgn_date
+        and intrstbgndt <= :end_date
+        and pay_flag = '1'
+        order by orderno desc;
+    if( sqlca.sqlcode != 0 )
+    {
+        if( sqlca.sqlcode == 100 )
+        {
+            WriteLog( ERR_LVL,"当前没有缴存的交易" );
+            /* 置缴存笔数为0 金额为0.00 */
+            PutPoolDataByName( "PAGTBUF", "bal", 0, 0, "0.00", 0 );
+            PutPoolDataByName( "PAGTBUF", "num", 0, 0, "0", 0 );
+            EXEC SQL free acc_amt;
+            return 0;
+        }
+        else
+        {
+            WriteLog( ERR_LVL, "查询t_pb_payforQuarantee表失败![%d]", sqlca.sqlcode );
+            EXEC SQL free acc_amt;
+            return -1;
+        }
+    } 
+    EXEC SQL open acc_amt;
+    if( sqlca.sqlcode != 0 )
+    {
+        WriteLog( ERR_LVL, "open acc_amt cursor error![%d]", sqlca.sqlcode );
+        EXEC SQL free acc_amt;
+        return -1;
+    }
+    while ( 1 )
+    {
+        memset( &payforQuarantee, 0, sizeof( payforQuarantee ) );
+        EXEC SQL fetch acc_amt into :payforQuarantee;
+        if( sqlca.sqlcode != 0 )
+        {
+            if ( sqlca.sqlcode == 100 )
+            {
+                WriteLog( ERR_LVL, "自贡建网单日凭证打印查询完毕!" );
+                EXEC SQL CLOSE acc_amt;
+                EXEC SQL FREE acc_amt;
+                break;
+            }
+            else
+            {
+                WriteLog( ERR_LVL, "fetch error [%d]", sqlca.sqlcode );
+                EXEC SQL CLOSE acc_amt;
+                EXEC SQL FREE acc_amt;
+                return -1;
+            }
+        }
+        /*解密缴费金额*/
+        memset( outamt,0,sizeof( outamt ) );
+        DesLine( trim( payforQuarantee.transAmt ), outamt, "1234554326781980", 1 );
+        total_amt += atof( outamt );
+        num++;
+    }
+    memset( samt, 0, sizeof( samt ) );
+    sprintf( samt, "%.2f", total_amt );
+    PutPoolDataByName( "PAGTBUF", "bal", 0, 0, samt, 0 );
+    memset( snum, 0, sizeof( snum ) );
+    sprintf( snum, "%ld", num );
+    PutPoolDataByName( "PAGTBUF", "num", 0, 0, snum, 0 );
+    memset( sccinacc, 0x00, sizeof( sccinacc ) );
+    EXEC SQL select cstm_acc into :sccinacc
+        FROM t_pagt_mgmt
+        WHERE batchno = '7010000001';
+    if( sqlca.sqlcode != 0 )
+    {
+        if( sqlca.sqlcode == 100 )
+        {
+            WriteLog( ERR_LVL, "无该建网账号信息!" );
+            return -1;
+        }
+        else
+        {
+            WriteLog( ERR_LVL, "select error[%d]!", sqlca.sqlcode );
+            return -1;
+        }
+    }
+    trim( sccinacc );
+    PutPoolDataByName( "PAGTBUF", "data12", 0, 0, sccinacc, 0 );
+    memset( dirname, 0x00, sizeof( dirname ) );
+    sprintf( dirname, "%s/%c%c/%s", getenv("PRINTERDIR"), inst_no[0], inst_no[1], inst_no );
+    if( access( dirname, 0 ) != 0 )
+    {
+        ret = mkdir( dirname, 0775 );
+        if( ret != 0 )
+        {
+            ERREXP( "mkdir error!" );
+            return -1;
+        }
+    }
+    memset( _seq_no, 0x00, sizeof( _seq_no ) );    
+    GetPoolDataByName( "ABSHEAD", "_seq_no", 0, 0, _seq_no, 0 );
+    memset( txtfile, 0x00, sizeof( txtfile ) );
+    sprintf( txtfile, "wy_sccin_%s_%s.txt", tran_date, _seq_no );
+    memset( datafile, 0x00, sizeof( datafile ) );
+    sprintf( datafile, "%s/%s", dirname, txtfile );
+    fp = fopen( datafile, "w+" );
+    if( fp == NULL )
+    {
+        ERREXP( "打开文件失败!" );
+        return -1;
+    } 
+    fprintf( fp, "%s|", sccinacc );
+    fprintf( fp, "%s|", samt );
+    fprintf( fp, "%s|", snum );
+    fprintf( fp, "%.8s|%.8s|", bgn_date, end_date);
+    fprintf( fp, "%s|", _tlr_no );
+    fprintf( fp, "||\n" );
+    fclose( fp );
+    memset( fmtfile, 0x00, sizeof( fmtfile ) );
+    sprintf( fmtfile, "%s/fmt/wy_sccin_prt.cf", getenv( "HOME" ) );
+    memset( filename, 0x00, sizeof( filename ) );
+    sprintf( filename, "%s/wy_sccin_%s_%s.rpt", dirname, tran_date, _seq_no );
+    WriteLog( APP_LVL, "fmtfile  [%s]", fmtfile );
+    WriteLog( APP_LVL, "datafile  [%s]", datafile );
+    WriteLog( APP_LVL, "filename [%s]", filename );
+    ret = Cert_Print( fmtfile, datafile, filename, 32 );
+    if( ret )
+    {
+        ERREXP( "生成打印文件错!" );
+        WriteLog( ERR_LVL, "fmtfile  [%s]", fmtfile );
+        WriteLog( ERR_LVL, "datafile  [%s]", datafile );
+        WriteLog( ERR_LVL, "filename [%s]", filename );
+        return -1;
+    }
+
+    sprintf( rptfile, "wy_sccin_%s_%s.rpt", tran_date, _seq_no );
+    WriteLog( ERR_LVL, "rptfile [%s]", rptfile );
+    PutPoolDataByName( "ABSHEAD", "recv_filename", 0, 0, rptfile, 0 );
+    return 0;
+}
+
+/* 网银流水表记录赋值到内存 */
+pdlink query_t_pb_net_dtl( const char * sql, const char * yr_flag, const char * tranflag )
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+        char sqlstr[500 + 1];
+        struct s_pb_net_dtl dtl;
+    EXEC SQL END DECLARE SECTION;
+    int i = 0;
+    pdlink lhead = NULL;
+    pdlink ltmp = NULL;
+    pdlink lcur = NULL;
+    
+    memset( sqlstr, 0x00, sizeof( sqlstr ) );
+    strcpy( sqlstr, sql ); 
+    WriteLog( ERR_LVL, "sql [%s]", sqlstr );
+    EXEC SQL prepare net_dtl_str from :sqlstr;
+    if( sqlca.sqlcode != 0 )
+    {
+        WriteLog( ERR_LVL, "prepare error! sqlcode[%ld]", sqlca.sqlcode );
+        ERREXP( "prepare error!" );
+        return NULL;
+    }
+    EXEC SQL declare net_dtl_cur cursor for net_dtl_str;
+    if( sqlca.sqlcode != 0 )
+    {
+        WriteLog( ERR_LVL, "declare cursor error! sqlcode[%ld]", sqlca.sqlcode );
+        ERREXP( "declare error!" );
+        EXEC SQL free net_dtl_str;
+        return NULL;
+    }
+    EXEC SQL open net_dtl_cur;
+    if( sqlca.sqlcode )
+    {
+        WriteLog( ERR_LVL, "open cursor error! sqlcode[%ld]", sqlca.sqlcode );
+        ERREXP( "open cursor error!" );
+        EXEC SQL free net_dtl_cur;
+        EXEC SQL free net_dtl_str;
+        return NULL;
+    }
+    lhead = ( pdlink ) malloc( sizeof( dlink ) );
+    lhead->next = NULL;
+    lcur = lhead; 
+    while ( 1 )
+    {
+        memset( &dtl, 0x00, sizeof( struct s_pb_net_dtl ) );
+        EXEC SQL fetch net_dtl_cur into :dtl;
+        if ( sqlca.sqlcode != 0 )
+        {
+            if ( sqlca.sqlcode == 100 )
+            {
+                EXEC SQL close net_dtl_cur;
+                EXEC SQL free net_dtl_cur;
+                EXEC SQL free net_dtl_str;
+                break; 
+            }
+            else
+            {
+                WriteLog( ERR_LVL, "fetch error! sqlcode[%ld]", sqlca.sqlcode );
+                EXEC SQL close net_dtl_cur;
+                EXEC SQL free net_dtl_cur;
+                EXEC SQL free net_dtl_str;
+                return NULL;
+            }
+        }
+        else
+        {
+            trim(tranflag);
+            /* 手续费凭证跳过手续费金额为0的交易记录 */
+            if ( (strcmp(tranflag,"638002")==0) || (strcmp(tranflag,"638102")==0) )
+            {
+                if( dtl.fee < 0.001 )
+                {
+                    WriteLog( APP_LVL, "本条记录trandate[%s]seqno[%s]手续费金额为[%.2f],不予统计",
+                          dtl.trandate, dtl.seqno, dtl.fee );
+                    continue;
+                }
+            }
+            
+            /* 已打印 */
+            if ( strcmp( yr_flag, "2" ) == 0 )
+            {
+                if ( strcmp( tranflag, "638001" ) == 0 )
+                {
+                    if ( dtl.backup8[100] < '1' &&
+                         dtl.backup8[101] < '1' && 
+                         dtl.backup8[102] < '1' && 
+                         dtl.backup8[103] < '1' && 
+                         dtl.backup8[104] < '1' && 
+                         dtl.backup8[105] < '1' && 
+                         dtl.backup8[106] < '1' ) 
+                        continue;
+                }         
+                if ( strcmp( tranflag, "638002" ) == 0 )
+                {
+                    if ( dtl.backup8[107] < '1' &&
+                         dtl.backup8[108] < '1' && 
+                         dtl.backup8[109] < '1' && 
+                         dtl.backup8[110] < '1' && 
+                         dtl.backup8[111] < '1' && 
+                         dtl.backup8[112] < '1' && 
+                         dtl.backup8[113] < '1' ) 
+                        continue;
+                }         
+                if ( strcmp( tranflag, "638003" ) == 0 )
+                {
+                    if ( dtl.backup8[114] < '1' &&
+                         dtl.backup8[115] < '1' && 
+                         dtl.backup8[116] < '1' && 
+                         dtl.backup8[117] < '1' && 
+                         dtl.backup8[118] < '1' && 
+                         dtl.backup8[119] < '1' && 
+                         dtl.backup8[120] < '1' ) 
+                        continue;
+                }         
+                if ( strcmp( tranflag, "638004" ) == 0 )
+                {
+                    if ( dtl.backup8[121] < '1' &&
+                         dtl.backup8[122] < '1' && 
+                         dtl.backup8[123] < '1' && 
+                         dtl.backup8[124] < '1' && 
+                         dtl.backup8[125] < '1' && 
+                         dtl.backup8[126] < '1' && 
+                         dtl.backup8[127] < '1' ) 
+                        continue;
+                }         
+            }
+            /* 未打印 */
+            if ( strcmp( yr_flag, "1" ) == 0 )
+            {
+                if ( strcmp( tranflag, "638001" ) == 0 )
+                {
+                    if ( dtl.backup8[100] >= '1' || 
+                         dtl.backup8[101] >= '1' || 
+                         dtl.backup8[102] >= '1' || 
+                         dtl.backup8[103] >= '1' || 
+                         dtl.backup8[104] >= '1' || 
+                         dtl.backup8[105] >= '1' || 
+                         dtl.backup8[106] >= '1' ) 
+                        continue;
+                }         
+                if ( strcmp( tranflag, "638002" ) == 0 )
+                {
+                    if ( dtl.backup8[107] >= '1' || 
+                         dtl.backup8[108] >= '1' || 
+                         dtl.backup8[109] >= '1' || 
+                         dtl.backup8[110] >= '1' || 
+                         dtl.backup8[111] >= '1' || 
+                         dtl.backup8[112] >= '1' || 
+                         dtl.backup8[113] >= '1' ) 
+                        continue;
+                }         
+                if ( strcmp( tranflag, "638003" ) == 0 )
+                {
+                    if ( dtl.backup8[114] >= '1' || 
+                         dtl.backup8[115] >= '1' || 
+                         dtl.backup8[116] >= '1' || 
+                         dtl.backup8[117] >= '1' || 
+                         dtl.backup8[118] >= '1' || 
+                         dtl.backup8[119] >= '1' || 
+                         dtl.backup8[120] >= '1' ) 
+                        continue;
+                }         
+                if ( strcmp( tranflag, "638004" ) == 0 )
+                {
+                    if ( dtl.backup8[121] >= '1' || 
+                         dtl.backup8[122] >= '1' || 
+                         dtl.backup8[123] >= '1' || 
+                         dtl.backup8[124] >= '1' || 
+                         dtl.backup8[125] >= '1' || 
+                         dtl.backup8[126] >= '1' || 
+                         dtl.backup8[127] >= '1' ) 
+                        continue;
+                }         
+            }
+            i++;
+            ltmp = ( pdlink ) malloc ( sizeof ( dlink ) );
+            memset( &ltmp->dtl, 0x00, sizeof( struct s_pb_net_dtl ) );
+            ltmp->next = NULL;
+            ltmp->dtl = dtl;
+            lcur->next = ltmp;
+            lcur = ltmp;
+            ltmp->next = NULL;
+        }
+    }
+    WriteLog( ERR_LVL, "i [%d]", i );
+    return lhead;
+}
+
+/* 释放记录流水的内存 */
+int freelink( pdlink lhead )
+{
+    pdlink ltmp = NULL;
+
+    while ( lhead != NULL )
+    {
+        ltmp = lhead;
+        lhead = lhead->next;
+        memset( &ltmp->dtl, 0x00, sizeof( struct s_pb_net_dtl ) );
+        ltmp->next = NULL;
+        free( ltmp );
+        ltmp = NULL;
+    }
+    return 0;
+}
+
+/* 内存分页处理 */
+pdlink dtl_page_proc( const pdlink pin, unsigned int beginno, unsigned int num, char * flag )
+{
+    pdlink lcur = NULL;
+    pdlink ltmp = NULL;
+    pdlink lhead = NULL;
+    pdlink lcur2 = NULL;
+    int i = 0;
+    int j = 0;
+
+    if ( pin == NULL )
+    {
+        WriteLog( ERR_LVL, "退出 PIN is NULL" );
+        return NULL;
+    }
+    if ( beginno < 1 )
+    {
+        WriteLog( ERR_LVL, "退出 beginno[%d]", beginno );
+        return NULL;
+    }
+    if ( num < 1 )
+    {
+        WriteLog( ERR_LVL, "退出 num[%d]", num );
+        return NULL;
+    }
+    /* 没有剩余记录 */
+    strcpy( flag, "0" );
+    lhead = ( pdlink ) malloc( sizeof( dlink ) );
+    lhead->next = NULL;
+    lcur2 = lhead;
+    lcur = pin->next;
+    while( lcur != NULL )
+    {
+        i++;
+        if ( i < beginno )
+        {
+            lcur = lcur->next;
+            continue;
+        }
+        else
+        {
+            j++;
+            if ( j > num )
+            {
+                /* 还有剩余记录 */ 
+                strcpy( flag, "1" );
+                break;
+            }
+            ltmp = ( pdlink ) malloc ( sizeof ( dlink ) );
+            memset( &ltmp->dtl, 0x00, sizeof( struct s_pb_net_dtl ) );
+            ltmp->next = NULL;
+            ltmp->dtl = lcur->dtl;
+            lcur2->next = ltmp;
+            lcur2 = ltmp;
+            ltmp->next = NULL;
+            lcur = lcur->next;
+        }
+    }
+    
+    WriteLog( ERR_LVL, "i[%d] j[%d]", i, j );
+    return lhead;
+}
+
+/* 记账查询 */
+pdlink pub_query( const char * bgn_date, const char * end_date, const char * inst_no, 
+    const char * acc, const char * chnlseqno, const char * yr_flag, 
+    unsigned int beginno, unsigned int num, char * flag, const char * printflag, 
+    const char * seq, const char * btchnb, const char * bat_no, const char * tranflag )
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+        char sql[500 + 1];
+        char tmp[500 + 1];
+    EXEC SQL END DECLARE SECTION;
+    pdlink pdl = NULL;
+    pdlink pret = NULL;
+    
+    memset( sql, 0x00, sizeof(sql) ); 
+    memset( tmp, 0x00, sizeof(tmp) ); 
+
+    if ( strlen( seq ) > 0 )
+    {
+        memset( sql, 0x00, sizeof( sql ) ); 
+        sprintf( sql, " select * from t_pb_net_dtl where trandate = '%s' and (seqno='%s' or backup3='%s') ", bgn_date, seq, seq );
+    }
+    else
+    {
+        memset( sql, 0x00, sizeof( sql ) ); 
+        sprintf( sql, " select * from t_pb_net_dtl where " );
+        /* 开始日期 */
+        if ( strlen( bgn_date ) > 0 )
+        {
+            memset( tmp, 0x00, sizeof( tmp ) );
+            sprintf( tmp, " trandate >= '%s' ", bgn_date );
+            strcat( sql, tmp );
+        }
+        /* 结束日期 */
+        if ( strlen( end_date ) > 0 )
+        {
+            memset( tmp, 0x00, sizeof( tmp ) );
+            sprintf( tmp, " and  trandate <= '%s' ", end_date );
+            strcat( sql, tmp );
+        }
+        if ( strlen( bat_no ) == 0 )
+        {
+            /* 支持的交易 */
+            strcat( sql, 
+            " and outtrancode in('CBS0000100','CBS0000110','CBS0000360','CBS1000420','CBS1000470','CBSMPS0010','CBSMPS0020', 'MPS0000010', 'MPS0000020') " );
+        }
+        else
+        {
+            /* 支持的交易 */
+            strcat( sql, 
+            " and outtrancode in('CBS1000220') " );
+        }
+        /* 收款机构和付款机构 */
+        memset( tmp, 0x00, sizeof( tmp ) );
+        sprintf( tmp, " and ( payinstno = '%s' or rcvinstno = '%s' ) ", inst_no, inst_no );
+        strcat( sql, tmp );
+        /* 交易账号 */
+        if ( strlen( acc ) > 0 )
+        {
+            memset( tmp, 0x00, sizeof( tmp ) );
+            sprintf( tmp, " and ( payacc = '%s' or rcvacc = '%s' ) ", acc, acc );
+            strcat( sql, tmp );
+        }
+        if ( strlen( bat_no ) == 0 )
+        {
+            /* 渠道流水 */
+            if ( strlen( chnlseqno ) > 0 )
+            {
+                memset( tmp, 0x00, sizeof( tmp ) );
+                sprintf( tmp, " and chnlseqno = '%s' ", chnlseqno );
+                strcat( sql, tmp );
+            }
+        }
+        else
+        {
+            /* 代发代理编号 */
+            memset( tmp, 0x00, sizeof( tmp ) );
+            sprintf( tmp, " and batchno = '%s' ", bat_no );
+            strcat( sql, tmp );
+            if ( strlen( btchnb ) > 0 )
+            {
+                /* 代发代理编号 */
+                memset( tmp, 0x00, sizeof( tmp ) );
+                sprintf( tmp, " and btchnb = '%s' ", btchnb );
+                strcat( sql, tmp );
+            }
+        }
+        /* 交易成功状态 */
+        strcat( sql, " and transtats[1,1] = '0' " );
+        if ( strcmp( tranflag, "638004" ) == 0 )
+        {
+            /* 批量自动回退之后才能查询批量代发失败明细 */
+            strcat( sql, " and transtats[4,4] = '3' " );
+        }
+    }
+    WriteLog( APP_LVL, "sql [%s]", sql );
+    /* 根据sql查询数据到内存pdl */
+    if ( ( pdl = query_t_pb_net_dtl( sql, yr_flag, tranflag ) ) == NULL )
+    {
+        ERREXP( "query_t_pb_net_dtl error!" );
+        return NULL;
+    }
+    /* 要分页 */
+    if ( printflag[0] == '1' )
+    {
+        /* 根据分页条件将符合条件的数据保存到内存pout */
+        if ( ( pret = dtl_page_proc( pdl, beginno, num, flag ) ) == NULL )
+        {
+            ERREXP( "dtl_page_proc error!" );
+            /* 释放pdl */
+            freelink( pdl );
+            /* 释放pret */
+            freelink( pret );
+            return NULL;
+        }
+        /* 释放pdl */
+        freelink( pdl );
+    }
+    /* 不分页 */
+    if ( printflag[0] == '0' )
+    {
+        pret = pdl;
+        strcpy( flag, "0" );
+    }
+    
+    WriteLog( ERR_LVL, "Call pub_query SUCCESS" );
+    
+    return pret;
+}
+
+/* null 金额转换 */
+void change_amt( char * amt )
+{
+    if ( strcmp( amt, "-NaNQ" ) == 0 )
+        strcpy( amt, "0" );
+}
+
+/* 打印次数处理 登记网银流水表backup8字段，记账登记101-107位 手续费登记108-114位 代发登记115-121位 代发失败登记122-128位 */
+int no_proc( const char * ins, int no, char * outs, long * onum )
+{
+    char tmp[128 + 1];
+    int  i = 0;
+    int  j = 0;
+    char tmp2[128 + 1];
+    char tmp3[128 + 1];
+    long num = 0;
+
+    WriteLog( APP_LVL, "ins[%s] no[%d] ", ins, no );
+    memset( tmp2, 0x00, sizeof( tmp2 ) );
+    if ( strlen( ins )  == 0  )
+    {
+        memset( tmp, 0x00, sizeof( tmp ) );
+        for ( i = 0; i < 128; i++ )
+            tmp[i] = '0';
+        tmp[no + 6] = '1';
+        *onum = 1;
+        strcpy( outs, tmp );
+        WriteLog( APP_LVL, "print 1 outs[%s] *onum[%d] ", outs, *onum );
+    }
+    else if ( ins[no] <= '0' && 
+              ins[no + 1] <= '0' && 
+              ins[no + 2] <= '0' && 
+              ins[no + 3] <= '0' && 
+              ins[no + 4] <= '0' &&  
+              ins[no + 5] <= '0' && 
+              ins[no + 6] <= '0' &&
+              strlen( ins ) > 0 )
+    {
+        memset( tmp2, 0x00, sizeof( tmp2 ) );
+        strcpy( tmp2, ins );
+        j = strlen( tmp2 );
+        for ( i = 0; i < 128 - j; i++ )
+            strcat( tmp2, "0" );
+        tmp2[no + 6] = '1';
+        *onum = 1;
+        strcpy( outs, tmp2 ) ;
+        WriteLog( APP_LVL, "print 2 outs[%s] *onum[%d] ", outs, *onum );
+    }
+    else if ( ins[no] > '0' || 
+              ins[no + 1] > '0' || 
+              ins[no + 2] > '0' || 
+              ins[no + 3] > '0' || 
+              ins[no + 4] > '0' ||  
+              ins[no + 5] > '0' || 
+              ins[no + 6] > '0' )
+    {
+        /* 有记录 */
+        memset( tmp2, 0x00, sizeof( tmp2 ) );
+        strncpy( tmp2, ins + no, 7 );
+        num = atol( tmp2 );
+        num++;
+        *onum = num;
+        memset( tmp2, 0x00, sizeof( tmp2 ) );
+        sprintf( tmp2, "%07ld", num );
+        strcpy( outs, ins );
+        outs[no] = tmp2[0];
+        outs[no + 1] = tmp2[1];
+        outs[no + 2] = tmp2[2];
+        outs[no + 3] = tmp2[3];
+        outs[no + 4] = tmp2[4];
+        outs[no + 5] = tmp2[5];
+        outs[no + 6] = tmp2[6];
+        WriteLog( APP_LVL, "print 3 outs[%s] *onum[%d] ", outs, *onum );
+    }
+    return 0;
+}
+
+
+/* 取失败代发笔数 */
+long get_batch_num_amt( const pdlink ptmp, const char * tran_date, long * num, double * amt )
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+        long fail_num = 0;
+        double fail_amt = 0.00;
+        char batch_no[100 + 1];
+        long agt_num = 0;
+        char hope_date[100 + 1];
+        char instno1[100 + 1];
+        char instno2[100 + 1];
+    EXEC SQL END DECLARE SECTION;
+
+    memset( batch_no, 0x00, sizeof(batch_no) );
+    memset( hope_date, 0x00, sizeof(hope_date) );
+    memset( instno1, 0x00, sizeof(instno1) );
+    memset( instno2, 0x00, sizeof(instno2) );
+
+    memset( batch_no, 0x00, sizeof( batch_no ) );
+    strcpy( batch_no, ptmp->dtl.batchno );
+    memset( hope_date, 0x00, sizeof( hope_date ) );
+    strcpy( hope_date, ptmp->dtl.trandate );
+    memset( instno1, 0x00, sizeof( instno1 ) );
+    strcpy( instno1, ptmp->dtl.payinstno );
+    memset( instno2, 0x00, sizeof( instno2 ) );
+    strcpy( instno2, ptmp->dtl.rcvinstno );
+    agt_num = ptmp->dtl.agt_num;
+    
+    WriteLog( ERR_LVL, "在批量管理当前表中查询[%s][%s]", tran_date, ptmp->dtl.trandate );
+    EXEC SQL select fail_num, fail_amt into :fail_num, :fail_amt from t_sc_agt_batch
+                     where batch_no = :batch_no
+                     and ( inst_no = :instno1 or inst_no = :instno2 )
+                     and hope_date = :hope_date
+                     and agt_num = :agt_num
+                     and fail_amt != 0;
+    if ( (sqlca.sqlcode != 0) && (sqlca.sqlcode != 100) )
+    {
+        WriteLog( ERR_LVL, "SELECT ERROR batch_no[%s] instno[%s][%s]", batch_no, instno1, instno2 );
+        WriteLog( ERR_LVL, "SELECT ERROR hope_date[%s] agt_num[%d]", hope_date, agt_num );
+        WriteLog( ERR_LVL, "查询批量管理表失败[%d]", sqlca.sqlcode );
+        return -1;
+    }
+    else if(sqlca.sqlcode == 100 )
+    {
+        WriteLog( ERR_LVL, "当前表查无数据，在批量管理历史表中查询[%s][%s]", tran_date, ptmp->dtl.trandate );
+        EXEC SQL select fail_num, fail_amt into :fail_num, :fail_amt from t_sc_agt_batch_his
+                         where batch_no = :batch_no
+                         and ( inst_no = :instno1 or inst_no = :instno2 )
+                         and hope_date = :hope_date
+                         and agt_num = :agt_num
+                         and fail_amt != 0;
+        if ( (sqlca.sqlcode != 0) && (sqlca.sqlcode != 100) )
+        {
+            WriteLog( ERR_LVL, "SELECT ERROR batch_no[%s] instno[%s][%s]", batch_no, instno1, instno2 );
+            WriteLog( ERR_LVL, "SELECT ERROR hope_date[%s] agt_num[%d]", hope_date, agt_num );
+            WriteLog( ERR_LVL, "查询批量管理历史表失败[%d]", sqlca.sqlcode );
+            return -1;
+        }
+        if ( sqlca.sqlcode == 100 )
+        {
+            WriteLog( ERR_LVL, "SELECT ERROR batch_no[%s] instno[%s][%s]", batch_no, instno1, instno2 );
+            WriteLog( ERR_LVL, "SELECT ERROR hope_date[%s] agt_num[%d]", hope_date, agt_num );
+            WriteLog( ERR_LVL, "查询批量管理历史表失败[%d]", sqlca.sqlcode );
+            return 100;
+        }
+    }
+
+    *num = fail_num;  
+    *amt = fail_amt;
+    return 0;
+}
+
+/*************************/
+/* 记账查询返回处理      */
+/* code:                 */
+/* 638001 - 账务查询     */
+/* 638101 - 账务打印     */
+/* 638002 - 手续费查询   */
+/* 638102 - 手续费打印   */
+/* 638003 - 代发查询     */
+/* 638103 - 代发打印     */
+/* 638004 - 代发失败查询 */
+/* 638104 - 代发失败打印 */
+/*************************/
+int pub_return_proc( const pdlink pout, const char * inst_no, long bgn_rec_no, 
+                        const char * _tlr_no, const char * flag, const char * code, 
+                        const char * tran_date )
+{
+    pdlink ptmp = NULL;
+    char stmp[200 + 1];
+    char stmp2[200 + 1];
+    char rcvbankname[200 + 1];
+    char paybankname[200 + 1];
+    int i = 0;
+    double amt1 = 0.00;
+    double amt2 = 0.00;
+    long n = 0;
+    char dirname[200 + 1];
+    char txtfile[200 + 1];
+    char datafile[200 + 1];
+    char samt1[200 + 1];
+    char samt2[200 + 1];
+    char samt3[200 + 1];
+    char tran_name[100 + 1];
+    char paybankno[100 + 1];
+    char rcvbankno[100 + 1];
+    char bigamt[200 + 1];
+    char _seq_no[100 + 1];
+    long ret = 0;
+    FILE * fp = NULL;
+    long num = 0;
+    long no = 0;
+    int j = 0;
+    char fmtfile[200 + 1];
+    char filename[200 + 1]; 
+    char sfile[200 + 1];
+    EXEC SQL BEGIN DECLARE SECTION;
+        char spno[200 + 1];
+        char date1[100 + 1];
+        char seq1[100 + 1];
+        long succ_num = 0;
+        long fail_num = 0;
+        double fail_amt = 0.00;
+        char batch_no[100 + 1];
+        long agt_num = 0;
+        char hope_date[100 + 1];
+        char instno1[100 + 1];
+        char instno2[100 + 1];
+    EXEC SQL END DECLARE SECTION;
+    
+    memset( stmp, 0x00, sizeof(stmp) );
+    memset( stmp2, 0x00, sizeof(stmp2) );
+    memset( rcvbankname, 0x00, sizeof(rcvbankname) );
+    memset( paybankname, 0x00, sizeof(paybankname) );
+    memset( dirname, 0x00, sizeof(dirname) );
+    memset( txtfile, 0x00, sizeof(txtfile) );
+    memset( datafile, 0x00, sizeof(datafile) );
+    memset( samt1, 0x00, sizeof(samt1) );
+    memset( samt2, 0x00, sizeof(samt2) );
+    memset( samt3, 0x00, sizeof(samt3) );
+    memset( tran_name, 0x00, sizeof(tran_name) );
+    memset( paybankno, 0x00, sizeof(paybankno) );
+    memset( rcvbankno, 0x00, sizeof(rcvbankno) );
+    memset( bigamt, 0x00, sizeof(bigamt) );
+    memset( _seq_no, 0x00, sizeof(_seq_no) );
+    memset( fmtfile, 0x00, sizeof(fmtfile) );
+    memset( filename, 0x00, sizeof(filename) );
+    memset( sfile, 0x00, sizeof(sfile) );
+    memset( spno, 0x00, sizeof(spno) );
+    memset( date1, 0x00, sizeof(date1) );
+    memset( seq1, 0x00, sizeof(seq1) );
+    memset( batch_no, 0x00, sizeof(batch_no) );
+    memset( hope_date, 0x00, sizeof(hope_date) );
+    memset( instno1, 0x00, sizeof(instno1) );
+    memset( instno2, 0x00, sizeof(instno2) );    
+
+    if ( strncmp( code, "6381", 4 ) == 0 )
+    {
+        EXEC SQL begin work;
+        if( sqlca.sqlcode != 0 )
+        {
+            WriteLog( ERR_LVL, "begin work error [%d]", sqlca.sqlcode );
+            return -1;
+        }
+        memset( dirname, 0x00, sizeof( dirname ) );
+        sprintf( dirname, "%s/%c%c/%s", getenv("PRINTERDIR"), inst_no[0], inst_no[1], inst_no );
+        if( access( dirname, 0 ) != 0 )
+        {
+            ret = mkdir( dirname, 0775 );
+            if( ret != 0 )
+            {
+                ERREXP( "mkdir error!" );
+                EXEC SQL rollback work; 
+                if( sqlca.sqlcode != 0 )
+                {
+                    WriteLog( ERR_LVL, "rollback work error [%d]", sqlca.sqlcode );
+                    return -1;
+                }
+                return -1;
+            }
+        }
+        memset( _seq_no, 0x00, sizeof( _seq_no ) );
+        GetPoolDataByName( "ABSHEAD", "_seq_no", 0, 0, _seq_no, 0 );
+        memset( txtfile, 0x00, sizeof( txtfile ) );
+        if ( strcmp( code, "638101" ) == 0 )
+            sprintf( txtfile, "wy_cert_prt_%s_%s.txt", tran_date, _seq_no );
+        else if ( strcmp( code, "638102" ) == 0 )
+            sprintf( txtfile, "wy_cert_prt_sxf_%s_%s.txt", tran_date, _seq_no );
+        else if ( strcmp( code, "638103" ) == 0 )
+            sprintf( txtfile, "wy_cert_prt_agt_%s_%s.txt", tran_date, _seq_no );
+        else if ( strcmp( code, "638104" ) == 0 )
+            sprintf( txtfile, "wy_cert_prt_agtsb_%s_%s.txt", tran_date, _seq_no );
+        memset( datafile, 0x00, sizeof( datafile ) );
+        sprintf( datafile, "%s/%s", dirname, txtfile );
+        fp = fopen( datafile, "w+" );
+        if( fp == NULL )
+        {
+             ERREXP( "打开文件失败!" );
+             EXEC SQL rollback work; 
+             if( sqlca.sqlcode != 0 )
+             {
+                WriteLog( ERR_LVL, "rollback work error [%d]", sqlca.sqlcode );
+                return -1;
+             }
+             return -1;
+        }
+    }
+    ptmp = pout->next;
+    while ( ptmp != NULL )
+    {
+        /* 交易金额 */
+        memset( samt1, 0x00, sizeof( samt1 ) );
+        sprintf( samt1, "%.2f", ptmp->dtl.transamt );
+        trim( samt1 );
+        change_amt( samt1 );
+        amt1 = atof( samt1 );
+        memset( bigamt, 0x00, sizeof( bigamt ) );
+        Amt2Bigamt( "01", 60, amt1, bigamt );
+        /* 手续费 */
+        memset( samt2, 0x00, sizeof( samt2 ) );
+        sprintf( samt2, "%.2f", ptmp->dtl.fee );
+        trim( samt2 );
+        change_amt( samt2 );
+        amt2 = atof( samt2 );
+               
+        /* 总金额 */
+        memset( samt3, 0x00, sizeof( samt3 ) );
+        sprintf( samt3, "%.2f", amt1 + amt2 );
+        /* 交易名称 */
+        memset( tran_name, 0x00, sizeof( tran_name ) );
+        if( strcmp( trim( ptmp->dtl.outtrancode ), "CBS0000100" ) == 0 )
+            strcpy( tran_name, "行内转账" );
+        if( strcmp( trim( ptmp->dtl.outtrancode ), "CBS0000110" ) == 0 )
+            strcpy( tran_name, "跨行转账" );
+        if( strcmp( trim( ptmp->dtl.outtrancode ), "CBS1000220" ) == 0 )
+            strcpy( tran_name, "代发工资" );
+        if( strcmp( trim( ptmp->dtl.outtrancode ), "CBS0000360" ) == 0 )
+            strcpy( tran_name, "集团资金上划下拨、统一行内支付" );
+        if( strcmp( trim( ptmp->dtl.outtrancode ), "CBS1000420" ) == 0 )
+            strcpy( tran_name, "建设网保证金退款" );
+        if( strcmp( trim( ptmp->dtl.outtrancode ), "CBS1000470" ) == 0 )
+            strcpy( tran_name, "建设网保证金缴存" );
+        if( strcmp( trim( ptmp->dtl.outtrancode ), "CBSMPS0010" ) == 0 ||
+            strcmp( trim( ptmp->dtl.outtrancode ), "MPS0000010" ) == 0 )
+            strcpy( tran_name, "超级网银借记客户帐" );
+        if( strcmp( trim( ptmp->dtl.outtrancode ), "CBSMPS0020" ) == 0 ||
+            strcmp( trim( ptmp->dtl.outtrancode ), "MPS0000020" ) == 0 )
+            strcpy( tran_name, "超级网银贷记客户帐" );
+        
+        proc_half_char(ptmp->dtl.rcvopenname);
+        proc_half_char(ptmp->dtl.backup2 );
+        proc_half_char(ptmp->dtl.payopenname );
+
+        /* 收款行名、收款行号 */
+        if ( strcmp( trim( ptmp->dtl.outtrancode ), "CBS0000110" ) == 0 ||
+             strcmp( trim( ptmp->dtl.outtrancode ), "CBS1000420" ) == 0 ||
+             strcmp( trim( ptmp->dtl.outtrancode ), "CBS1000470" ) == 0 ||
+             strcmp( trim( ptmp->dtl.outtrancode ), "CBS0000100" ) == 0 )
+        {
+            memset( rcvbankname, 0x00, sizeof( rcvbankname ) );
+            strcpy( rcvbankname, trim( ptmp->dtl.backup2 ) );
+            memset( rcvbankno, 0x00, sizeof( rcvbankno ) );
+            strcpy( rcvbankno, trim( ptmp->dtl.backup1 ) );
+        }
+        if ( strcmp( trim( ptmp->dtl.outtrancode ), "CBSMPS0010" ) == 0 ||
+             strcmp( trim( ptmp->dtl.outtrancode ), "CBSMPS0020" ) == 0 ||
+             strcmp( trim( ptmp->dtl.outtrancode ), "MPS0000010" ) == 0 ||
+             strcmp( trim( ptmp->dtl.outtrancode ), "MPS0000020" ) == 0 )
+        {
+            memset( rcvbankname, 0x00, sizeof( rcvbankname ) );
+            strcpy( rcvbankname, trim( ptmp->dtl.rcvopenname ) );
+            memset( rcvbankno, 0x00, sizeof( rcvbankno ) );
+            strcpy( rcvbankno, trim( ptmp->dtl.rcvopeninst ) );
+        }
+        /* 付款行名称、付款行号 */
+        memset( paybankname, 0x00, sizeof( paybankname ) );
+        strcpy( paybankname, trim(ptmp->dtl.payopenname ) );
+            
+        memset( paybankno, 0x00, sizeof( paybankno ) );
+        trim(ptmp->dtl.payopeninst);
+        strcpy( paybankno, trim(ptmp->dtl.payopeninst) );
+            
+        WriteLog( APP_LVL, "paybankno[%s] paybankname[%s]", paybankno, paybankname );
+        WriteLog( APP_LVL, "rcvbankno[%s] rcvbankname[%s]", rcvbankno, rcvbankname );
+
+        if ( strncmp( code, "6380", 4 ) == 0 )
+        {
+
+            /* 代发失败凭证需跳过代发完全成功的数据 */
+            if ( strcmp( code, "638004" ) == 0 )
+            {
+                ret = get_batch_num_amt( ptmp, tran_date, &fail_num, &fail_amt );
+                if ( 100 == ret )
+                {
+                    WriteLog( ERR_LVL, "该笔代发无失败记录 date[%s] seqno[%s]", ptmp->dtl.trandate, ptmp->dtl.seqno );
+                    ptmp = ptmp->next;
+                    continue;
+                }
+                else if ( ret < 0 )
+                {
+                    WriteLog( ERR_LVL, "数据库错 get_batch_num_amt error" );
+                    ERREXP( "数据库错，请稍后重试!" );
+                    return -1;
+                }
+            }
+            
+            /* 交易日期 */
+            PutPoolDataByName( "PAGTBUF", "tran_date", 0, i, trim( ptmp->dtl.trandate ), 0 );
+            WriteLog( APP_LVL, "ptmp->dtl.trandate [%s]", ptmp->dtl.trandate );
+            /* 主机流水号 */
+            rtrim (ptmp->dtl.backup3);
+            if ((strcmp( trim( ptmp->dtl.outtrancode ), "CBS0000110" ) == 0  ||
+                 strcmp( trim( ptmp->dtl.outtrancode ), "CBS0000100" ) == 0  ||
+                 strcmp( trim( ptmp->dtl.outtrancode ), "CBS1000420" ) == 0  ||
+                 strcmp( trim( ptmp->dtl.outtrancode ), "CBS1000470" ) == 0  ||
+                 strcmp( trim( ptmp->dtl.outtrancode ), "MPS0000010" ) == 0  ||
+                 strcmp( trim( ptmp->dtl.outtrancode ), "MPS0000020" ) == 0 ) )
+            {
+               /** 行内与跨行特殊处理 **/
+                PutPoolDataByName( "PAGTBUF", "passwd", 0, i, ptmp->dtl.backup3, 0 ); 
+                WriteLog( ERR_LVL, "ptmp->dtl.backup3 [%s]", ptmp->dtl.backup3 );
+            }
+            else 
+            {
+                PutPoolDataByName( "PAGTBUF", "passwd", 0, i, trim( ptmp->dtl.seqno ), 0 ); 
+                WriteLog( ERR_LVL, "ptmp->dtl.seqno [%s]", ptmp->dtl.seqno );
+            }
+
+            /* 交易金额 */
+            PutPoolDataByName( "PAGTBUF", "bal", 0, i, samt1, 0 );
+            /* 手续费 */
+            PutPoolDataByName( "PAGTBUF", "payment_bal", 0, i, samt2, 0 );
+            /* 总金额 */
+            PutPoolDataByName( "PAGTBUF", "amt", 0, i, samt3, 0 );
+            /* 交易名称 */
+            PutPoolDataByName( "PAGTBUF", "batch_name", 0, i, tran_name, 0 );
+            
+            /* 流水号 */
+            trim( ptmp->dtl.chnlseqno );
+            if( strlen(ptmp->dtl.chnlseqno)>15 )
+            {
+                WriteLog( ERR_LVL, "chnlseqno[%s]长度过长，不取前5位[%s]", ptmp->dtl.chnlseqno, ptmp->dtl.chnlseqno+5 );
+                PutPoolDataByName( "PAGTBUF", "data15", 0, i, ptmp->dtl.chnlseqno+5, 0 );
+            }
+            else
+            {
+                PutPoolDataByName( "PAGTBUF", "data15", 0, i, ptmp->dtl.chnlseqno, 0 );
+            }
+            /* 代理编号 */
+            if ( strlen( trim( ptmp->dtl.btchnb ) ) > 0 )
+            {
+                PutPoolDataByName( "PAGTBUF", "data15", 0, i, trim( ptmp->dtl.btchnb ), 0 );
+            }
+            
+            /* 收款人账号 */
+            PutPoolDataByName( "PAGTBUF", "data9", 0, i, trim( ptmp->dtl.rcvacc ), 0 ); 
+            /* 收款人名称 */
+            PutPoolDataByName( "PAGTBUF", "data11", 0, i, trim( ptmp->dtl.rcvcustname ), 0 );
+            /* 收款行名 */
+            PutPoolDataByName( "PAGTBUF", "data10", 0, i, trim( rcvbankname ), 0 );
+            /* 付款人账号 */
+            PutPoolDataByName( "PAGTBUF", "data12", 0, i, trim( ptmp->dtl.payacc ), 0 );
+            PutPoolDataByName( "PAGTBUF", "pagt_acc", 0, i, trim( ptmp->dtl.payacc ), 0 );
+            /* 付款人名称 */
+            PutPoolDataByName( "PAGTBUF", "data14", 0, i, trim( ptmp->dtl.paycustname ), 0 );
+            /* 付款行名称 */
+            PutPoolDataByName( "PAGTBUF", "data13", 0, i, trim( paybankname ), 0 );
+            /* 当前记录数 */ 
+            memset( stmp, 0x00, sizeof( stmp ) );
+            sprintf( stmp, "%ld", bgn_rec_no );
+            PutPoolDataByName( "PAGTBUF", "num", 0, i, stmp, 0 );
+            bgn_rec_no++;
+            
+            /* 柜员号 */
+            PutPoolDataByName( "PAGTBUF", "tlr_no", 0, i, _tlr_no, 0 );
+            /* 已打印 未打印 */
+            if ( strcmp( code, "638001" ) == 0 )
+            {
+                WriteLog( ERR_LVL, "code[%s] 账务凭证查询", code );
+                if ( ptmp->dtl.backup8[100] >= '1'
+                  || ptmp->dtl.backup8[101] >= '1'
+                  || ptmp->dtl.backup8[102] >= '1'
+                  || ptmp->dtl.backup8[103] >= '1'
+                  || ptmp->dtl.backup8[104] >= '1'
+                  || ptmp->dtl.backup8[105] >= '1'
+                  || ptmp->dtl.backup8[106] >= '1' )
+                {
+                    PutPoolDataByName( "PAGTBUF", "sigle_term", 0, i, "已打印", 0 );
+                }
+                else
+                {
+                    PutPoolDataByName( "PAGTBUF", "sigle_term", 0, i, "未打印", 0 );
+                }
+            }
+            if ( strcmp( code, "638002" ) == 0 )
+            {
+                WriteLog( ERR_LVL, "code[%s] 手续费凭证查询", code );
+                if ( ptmp->dtl.backup8[107] >= '1'
+                  || ptmp->dtl.backup8[108] >= '1'
+                  || ptmp->dtl.backup8[109] >= '1'
+                  || ptmp->dtl.backup8[110] >= '1'
+                  || ptmp->dtl.backup8[111] >= '1'
+                  || ptmp->dtl.backup8[112] >= '1'
+                  || ptmp->dtl.backup8[113] >= '1' )
+                {
+                    PutPoolDataByName( "PAGTBUF", "sigle_term", 0, i, "已打印", 0 );
+                }
+                else
+                {
+                    PutPoolDataByName( "PAGTBUF", "sigle_term", 0, i, "未打印", 0 );
+                }
+            }
+            if ( strcmp( code, "638003" ) == 0 )
+            {
+                WriteLog( ERR_LVL, "code[%s] 代发凭证查询", code );
+                if ( ptmp->dtl.backup8[114] >= '1'
+                  || ptmp->dtl.backup8[115] >= '1'
+                  || ptmp->dtl.backup8[116] >= '1'
+                  || ptmp->dtl.backup8[117] >= '1'
+                  || ptmp->dtl.backup8[118] >= '1'
+                  || ptmp->dtl.backup8[119] >= '1'
+                  || ptmp->dtl.backup8[120] >= '1' )
+                {
+                    PutPoolDataByName( "PAGTBUF", "sigle_term", 0, i, "已打印", 0 );
+                }
+                else
+                {
+                    PutPoolDataByName( "PAGTBUF", "sigle_term", 0, i, "未打印", 0 );
+                }
+                PutPoolDataByName( "PAGTBUF", "data10", 0, i, "", 0 );  /* 代发查询取消收款行名 */
+            }
+            if ( strcmp( code, "638004" ) == 0 )
+            {
+                WriteLog( ERR_LVL, "code[%s] 代发失败凭证查询", code );
+                
+                memset( stmp, 0x00, sizeof( stmp ) );
+                sprintf( stmp, "%.2lf", fail_amt );
+                trim(stmp);
+                change_amt(stmp);
+                PutPoolDataByName( "PAGTBUF", "amt", 0, i, "", 0 );
+                WriteLog( APP_LVL, "fail_amt[%s][%.2f] [%d]", stmp, fail_amt, fail_num );
+                PutPoolDataByName( "PAGTBUF", "amt", 0, i, stmp, 0 );
+                
+                memset( stmp, 0x00, sizeof( stmp ) );
+                sprintf( stmp, "%.2lf", ptmp->dtl.transamt );
+                trim(stmp);
+                change_amt(stmp);
+                PutPoolDataByName( "PAGTBUF", "bal", 0, i, "", 0 );
+                WriteLog( APP_LVL, "transamt[%s][%.2f]", stmp, ptmp->dtl.transamt );
+                PutPoolDataByName( "PAGTBUF", "bal", 0, i, stmp, 0 );
+                
+                if ( ptmp->dtl.backup8[121] >= '1'
+                  || ptmp->dtl.backup8[122] >= '1'
+                  || ptmp->dtl.backup8[123] >= '1'
+                  || ptmp->dtl.backup8[124] >= '1'
+                  || ptmp->dtl.backup8[125] >= '1'
+                  || ptmp->dtl.backup8[126] >= '1'
+                  || ptmp->dtl.backup8[127] >= '1' )
+                {
+                    PutPoolDataByName( "PAGTBUF", "sigle_term", 0, i, "已打印", 0 );
+                }
+                else
+                {
+                    PutPoolDataByName( "PAGTBUF", "sigle_term", 0, i, "未打印", 0 );
+                }
+                PutPoolDataByName( "PAGTBUF", "data10", 0, i, "", 0 );  /* 代发查询取消收款行名 */
+            }
+            /* 1-还有剩余记录 0-没有剩余记录 */
+            n = atol( flag );
+            PutPoolDataByName( "ABSHEAD", "_more_page", 0, 0, &n, 0 );
+        }
+        /* 账务打印格式 */
+        if ( strcmp( code, "638101" ) == 0 )
+        {
+            /* 年 */
+            memset( stmp, 0x00, sizeof( stmp ) );    
+            strncpy( stmp, trim( ptmp->dtl.trandate ), 4 );
+            fprintf( fp, "%s|", stmp );
+            /* 月 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            strncpy( stmp, ptmp->dtl.trandate + 4, 2 );
+            fprintf( fp, "%s|", stmp );
+            /* 日 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            strncpy( stmp, ptmp->dtl.trandate + 6, 2 );
+            fprintf( fp, "%s|", stmp );
+            /* 收款人名称的前30位在第一行 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            strncpy( stmp, trim( ptmp->dtl.rcvcustname ), 30 );
+            fprintf( fp, "%s|", stmp );
+            /* 付款人名称的前30位在第一行 */ 
+            memset( stmp, 0x00, sizeof( stmp ) );
+            strncpy( stmp, trim( ptmp->dtl.paycustname ), 30 );
+            fprintf( fp, "%s|", stmp );
+            /* 收款人名称的其余字段在第二行 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            strcpy( stmp, ptmp->dtl.rcvcustname + 30 );
+            fprintf( fp, "%s|", stmp );
+            /* 付款人名称的其余字段在第二行 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            strcpy( stmp, ptmp->dtl.paycustname + 30 );
+            fprintf( fp, "%s|", stmp );
+            /* 收款人账号 */
+            fprintf( fp, "%s|", trim( ptmp->dtl.rcvacc ) );
+            /* 付款人账号 */
+            fprintf( fp, "%s|", trim( ptmp->dtl.payacc ) );
+            /* 收款行号 */
+            fprintf( fp, "%s|", rcvbankno );
+            /* 付款行号 */
+            fprintf( fp, "%s|", paybankno );
+            /* 收款行名前30位在第二排 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            strncpy( stmp, rcvbankname, 30 );
+            fprintf( fp, "%s|", stmp );
+            /* 付款行名前30位在第二排 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            strncpy( stmp, paybankname, 30 );
+            fprintf( fp, "%s|", stmp );
+            /* 收款行名剩余的字段在第三排 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            strcpy( stmp, rcvbankname + 30 );
+            fprintf( fp, "%s|", stmp );
+            /* 付款行名剩余的字段在第三排 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            strcpy( stmp, paybankname + 30 );
+            fprintf( fp, "%s|", stmp );
+            /* 交易金额大写 */
+            fprintf( fp, "%s|", bigamt );
+            /* 交易金额小写 */
+            fprintf( fp, "%.2f|", amt1 );
+            /* 交易名称 */
+            fprintf( fp, "%s|", tran_name );
+            /* 渠道流水号 */
+            fprintf( fp, "%s|", trim( ptmp->dtl.chnlseqno ) );
+            /* 核心流水号 */
+            if ((strcmp( trim( ptmp->dtl.outtrancode ), "CBS0000110" ) == 0  ||
+                 strcmp( trim( ptmp->dtl.outtrancode ), "CBS0000100" ) == 0  ||
+                 strcmp( trim( ptmp->dtl.outtrancode ), "CBS1000420" ) == 0  ||
+                 strcmp( trim( ptmp->dtl.outtrancode ), "CBS1000470" ) == 0  ||
+                 strcmp( trim( ptmp->dtl.outtrancode ), "MPS0000010" ) == 0  ||
+                 strcmp( trim( ptmp->dtl.outtrancode ), "MPS0000020" ) == 0 ) )
+            {
+                 fprintf( fp, "%s|", trim( ptmp->dtl.backup3 ) );
+            }
+            else fprintf( fp, "%s|", trim( ptmp->dtl.seqno ) );
+
+            /* 柜员号 */
+            fprintf( fp, "%s|", _tlr_no );
+            /* 用途前42位放第四排 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            strncpy( stmp, trim( ptmp->dtl.use ), 42 );
+            fprintf( fp, "%s|", stmp );
+            /* 用途43位到84位放在第五排 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            strncpy( stmp, ptmp->dtl.use + 42, 42 );
+            fprintf( fp, "%s|", stmp );
+            /* 用途85位到126位放第六排 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            strncpy( stmp, ptmp->dtl.use + 84, 42 );
+            fprintf( fp, "%s|", stmp );
+            /* 打印次数 */
+            /* 登记网银流水表backup8字段，记账登记101-107位 手续费登记108-114位 代发登记115-121位 代发失败登记122-128位 */
+            memset( spno, 0x00, sizeof( spno ) );
+            num = 0;
+            no_proc( trim( ptmp->dtl.backup8 ), 100, spno, &num );
+            WriteLog( ERR_LVL, "spno[%s], num[%d] 账务凭证打印", spno, num );
+            fprintf( fp, "%d|", num );
+            /* 柜员号 */
+            fprintf( fp, "%s|", _tlr_no );
+            /* 交易日期 */
+            fprintf( fp, "%s|\n", tran_date );
+        }
+        /* 手续费打印格式 */
+        if ( strcmp( code, "638102" ) == 0 )
+        {
+            /* 年 */
+            memset( stmp, 0x00, sizeof( stmp ) );    
+            strncpy( stmp, trim( ptmp->dtl.trandate ), 4 );
+            fprintf( fp, "%s|", stmp );
+            /* 月 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            strncpy( stmp, ptmp->dtl.trandate + 4, 2 );
+            fprintf( fp, "%s|", stmp );
+            /* 日 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            strncpy( stmp, ptmp->dtl.trandate + 6, 2 );
+            fprintf( fp, "%s|", stmp );
+            /* 付款人名称 */
+            fprintf( fp, "%s|", trim( ptmp->dtl.paycustname ) );
+            /* 账号卡号 */
+            if( IsCardNo( trim( ptmp->dtl.payacc ) ) == 0 )
+                fprintf( fp, "|%s|", ptmp->dtl.payacc );
+            else
+                fprintf( fp, "%s||", ptmp->dtl.payacc );
+            /* 客户号 */
+            fprintf( fp, "%s|", trim( ptmp->dtl.custno ) );
+            /* 流水号 */
+            fprintf( fp, "%s|", trim( ptmp->dtl.chnlseqno ) );
+            /* 币种 */
+            fprintf( fp, "%s|", "人民币" );
+            /* 核心流水号 */
+            if ((strcmp( trim( ptmp->dtl.outtrancode ), "CBS0000110" ) == 0  ||
+                 strcmp( trim( ptmp->dtl.outtrancode ), "CBS0000100" ) == 0  ||
+                 strcmp( trim( ptmp->dtl.outtrancode ), "CBS1000420" ) == 0  ||
+                 strcmp( trim( ptmp->dtl.outtrancode ), "CBS1000470" ) == 0  ||
+                 strcmp( trim( ptmp->dtl.outtrancode ), "MPS0000010" ) == 0  ||
+                 strcmp( trim( ptmp->dtl.outtrancode ), "MPS0000020" ) == 0 ) )
+            {
+                 fprintf( fp, "%s|", trim( ptmp->dtl.backup3 ) );
+            }
+            else fprintf( fp, "%s|", trim( ptmp->dtl.seqno ) );
+            
+            /* 手续费大写 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            Amt2Bigamt( "01", 60, ptmp->dtl.fee, stmp );
+            fprintf( fp, "%s|", stmp );
+            fprintf( fp, "%.2f|", ptmp->dtl.fee );
+            /* 登记网银流水表backup8字段，记账登记101-107位 手续费登记108-114位 代发登记115-121位 代发失败登记122-128位 */
+            /* 打印次数 */
+            memset( spno, 0x00, sizeof( spno ) );
+            num = 0;
+            no_proc( trim( ptmp->dtl.backup8 ), 107, spno, &num );
+            WriteLog( ERR_LVL, "spno[%s], num[%d] 手续费凭证打印", spno, num );
+            fprintf( fp, "%d|", num );
+            fprintf( fp, "||\n" );
+        }
+        /* 代发凭证打印 */
+        if ( strcmp( code, "638103" ) == 0 )
+        {
+            /* 年 */
+            memset( stmp, 0x00, sizeof( stmp ) );    
+            strncpy( stmp, trim( ptmp->dtl.trandate ), 4 );
+            fprintf( fp, "%s|", stmp );
+            /* 月 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            strncpy( stmp, ptmp->dtl.trandate + 4, 2 );
+            fprintf( fp, "%s|", stmp );
+            /* 日 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            strncpy( stmp, ptmp->dtl.trandate + 6, 2 );
+            fprintf( fp, "%s|", stmp );
+            /* 付款人名称 */
+            fprintf( fp, "%s|", trim( ptmp->dtl.paycustname ) );
+            /* 账号卡号 */
+            if( IsCardNo( trim( ptmp->dtl.payacc ) ) == 0 )
+                fprintf( fp, "|%s|", ptmp->dtl.payacc );
+            else
+                fprintf( fp, "%s||", ptmp->dtl.payacc );
+            /* 客户号 */ 
+            fprintf( fp, "%s|", trim( ptmp->dtl.custno ) );
+            /* 代理编号 */ 
+            fprintf( fp, "%s|", trim( ptmp->dtl.batchno ) );
+            /* 币种 */
+            fprintf( fp, "%s|", "人民币" );
+            /* 核心流水号 */
+            fprintf( fp, "%s|", trim( ptmp->dtl.seqno ) );
+            /* 交易金额大写 */
+            fprintf( fp, "%s|", bigamt );
+            /* 交易金额小写 */
+            fprintf( fp, "%.2f|", amt1 );
+            /* 取成功代发笔数 */ 
+            memset( batch_no, 0x00, sizeof( batch_no ) );
+            strcpy( batch_no, ptmp->dtl.batchno );
+            memset( hope_date, 0x00, sizeof( hope_date ) );
+            strcpy( hope_date, ptmp->dtl.trandate );
+            memset( instno1, 0x00, sizeof( instno1 ) );
+            strcpy( instno1, ptmp->dtl.payinstno );
+            memset( instno2, 0x00, sizeof( instno2 ) );
+            strcpy( instno2, ptmp->dtl.rcvinstno );
+            agt_num = ptmp->dtl.agt_num;
+
+            WriteLog( ERR_LVL, "在批量管理当前表中查询[%s][%s]", tran_date, ptmp->dtl.trandate );
+            EXEC SQL select succ_num into :succ_num from t_sc_agt_batch
+                     where batch_no = :batch_no
+                     and ( inst_no = :instno1 or inst_no = :instno2 )
+                     and hope_date = :hope_date
+                     and agt_num = :agt_num;
+            if ( (sqlca.sqlcode != 0) && (sqlca.sqlcode != 100) )
+            {
+                WriteLog( ERR_LVL, "SELECT ERROR batch_no[%s] instno[%s][%s]", batch_no, instno1, instno2 );
+                WriteLog( ERR_LVL, "SELECT ERROR hope_date[%s] agt_num[%d]", hope_date, agt_num );
+                EXEC SQL rollback work;
+                if( sqlca.sqlcode != 0 )
+                {
+                    WriteLog( ERR_LVL, "rollback work error [%d]", sqlca.sqlcode );
+                    fclose( fp );
+                    return -1;
+                }
+                WriteLog( ERR_LVL, "查询批量管理表失败[%d]", sqlca.sqlcode );
+                fclose( fp );
+                return -1;
+            }
+            else if(sqlca.sqlcode == 100 )
+            {
+                WriteLog( ERR_LVL, "当前表查无数据，在批量管理历史表中查询[%s][%s]", tran_date, ptmp->dtl.trandate );
+                EXEC SQL select succ_num into :succ_num from t_sc_agt_batch_his
+                         where batch_no = :batch_no
+                         and ( inst_no = :instno1 or inst_no = :instno2 )
+                         and hope_date = :hope_date
+                         and agt_num = :agt_num;
+                if ( sqlca.sqlcode != 0 )
+                {
+                    WriteLog( ERR_LVL, "SELECT ERROR batch_no[%s] instno[%s][%s]", batch_no, instno1, instno2 );
+                    WriteLog( ERR_LVL, "SELECT ERROR hope_date[%s] agt_num[%d]", hope_date, agt_num );
+                    EXEC SQL rollback work;
+                    if( sqlca.sqlcode != 0 )
+                    {
+                        WriteLog( ERR_LVL, "rollback work error [%d]", sqlca.sqlcode );
+                        fclose( fp );
+                        return -1;
+                    }
+                    WriteLog( ERR_LVL, "查询批量管理历史表失败[%d]", sqlca.sqlcode );
+                    fclose( fp );
+                    return -1;    
+                }
+            }
+
+            fprintf( fp, "%d|", succ_num );
+            /* 打印次数 */
+            /* 登记网银流水表backup8字段，记账登记101-107位 手续费登记108-114位 代发登记115-121位 代发失败登记122-128位 */
+            memset( spno, 0x00, sizeof( spno ) );
+            num = 0;
+            no_proc( trim( ptmp->dtl.backup8 ), 114, spno, &num );
+            WriteLog( ERR_LVL, "spno[%s], num[%d] 代发凭证打印", spno, num );
+            fprintf( fp, "%d|", num );
+            fprintf( fp, "||\n" );
+        }
+        /* 代发失败凭证打印 */
+        if ( strcmp( code, "638104" ) == 0 )
+        {
+            /* 失败笔数 */
+            memset( batch_no, 0x00, sizeof( batch_no ) );
+            strcpy( batch_no, ptmp->dtl.batchno );
+            memset( hope_date, 0x00, sizeof( hope_date ) );
+            strcpy( hope_date, ptmp->dtl.trandate );
+            memset( instno1, 0x00, sizeof( instno1 ) );
+            strcpy( instno1, ptmp->dtl.payinstno );
+            memset( instno2, 0x00, sizeof( instno2 ) );
+            strcpy( instno2, ptmp->dtl.rcvinstno );
+            agt_num = ptmp->dtl.agt_num;
+            
+            WriteLog( ERR_LVL, "在批量管理当前表中查询[%s][%s]", tran_date, ptmp->dtl.trandate );
+            EXEC SQL select fail_num, fail_amt into :fail_num, :fail_amt from t_sc_agt_batch
+                     where batch_no = :batch_no
+                     and ( inst_no = :instno1 or inst_no = :instno2 )
+                     and hope_date = :hope_date
+                     and agt_num = :agt_num
+                     and fail_amt != 0;
+            if ( (sqlca.sqlcode!=0) && (sqlca.sqlcode!=100) )
+            {
+                WriteLog( ERR_LVL, "SELECT ERROR batch_no[%s] instno[%s][%s]", batch_no, instno1, instno2 );
+                WriteLog( ERR_LVL, "SELECT ERROR hope_date[%s] agt_num[%d]", hope_date, agt_num );
+                EXEC SQL rollback work;
+                if( sqlca.sqlcode != 0 )
+                {
+                    WriteLog( ERR_LVL, "rollback work error [%d]", sqlca.sqlcode );
+                    fclose( fp );
+                    return -1;
+                }
+                WriteLog( ERR_LVL, "查询批量管理表失败[%d]", sqlca.sqlcode );
+                fclose( fp );
+                return -1;
+            }
+            else if(sqlca.sqlcode == 100 )
+            {
+                WriteLog( ERR_LVL, "当前表查无数据，在批量管理历史表中查询[%s][%s]", tran_date, ptmp->dtl.trandate );
+                EXEC SQL select fail_num, fail_amt into :fail_num, :fail_amt from t_sc_agt_batch_his
+                         where batch_no = :batch_no
+                         and ( inst_no = :instno1 or inst_no = :instno2 )
+                         and hope_date = :hope_date
+                         and agt_num = :agt_num
+                         and fail_amt != 0;
+                if ( sqlca.sqlcode == 100 )
+                {
+                    WriteLog( ERR_LVL, "SELECT ERROR batch_no[%s] instno[%s][%s]", batch_no, instno1, instno2 );
+                    WriteLog( ERR_LVL, "SELECT ERROR hope_date[%s] agt_num[%d]", hope_date, agt_num );
+                    WriteLog( ERR_LVL, "该笔无代发失败记录，跳过" );
+                    ptmp = ptmp->next;
+                    continue;
+                }
+                else if ( (sqlca.sqlcode != 0) && (sqlca.sqlcode != 100) )
+                {
+                    WriteLog( ERR_LVL, "SELECT ERROR batch_no[%s] instno[%s][%s]", batch_no, instno1, instno2 );
+                    WriteLog( ERR_LVL, "SELECT ERROR hope_date[%s] agt_num[%d]", hope_date, agt_num );
+                    EXEC SQL rollback work;
+                    if( sqlca.sqlcode != 0 )
+                    {
+                        WriteLog( ERR_LVL, "rollback work error [%d]", sqlca.sqlcode );
+                        fclose( fp );
+                        return -1;
+                    }
+                    WriteLog( ERR_LVL, "查询批量管理历史表失败[%d]", sqlca.sqlcode );
+                    fclose( fp );
+                    return -1;
+                }
+            }
+            
+            /* 年 */
+            memset( stmp, 0x00, sizeof( stmp ) );    
+            strncpy( stmp, trim( ptmp->dtl.trandate ), 4 );
+            fprintf( fp, "%s|", stmp );
+            /* 月 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            strncpy( stmp, ptmp->dtl.trandate + 4, 2 );
+            fprintf( fp, "%s|", stmp );
+            /* 日 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            strncpy( stmp, ptmp->dtl.trandate + 6, 2 );
+            fprintf( fp, "%s|", stmp );
+            /* 付款人名称 */
+            fprintf( fp, "%s|", trim( ptmp->dtl.paycustname ) );
+            /* 账号卡号 */
+            if( IsCardNo( trim( ptmp->dtl.payacc ) ) == 0 )
+                fprintf( fp, "|%s|", ptmp->dtl.payacc );
+            else
+                fprintf( fp, "%s||", ptmp->dtl.payacc );
+            /* 客户号 */ 
+            fprintf( fp, "%s|", trim( ptmp->dtl.custno ) );
+            /* 代理编号 */
+            fprintf( fp, "%s|", trim( ptmp->dtl.batchno ) );
+            /* 批次号 */
+            fprintf( fp, "%d|", ptmp->dtl.agt_num );
+            /* 核心流水号 */
+            fprintf( fp, "%s|", trim( ptmp->dtl.seqno ) );
+            /* 币种 */
+            fprintf( fp, "%s|", "人民币" );
+            
+            fprintf( fp, "%d|", fail_num );
+            /* 失败金额大写 */
+            memset( stmp, 0x00, sizeof( stmp ) );
+            Amt2Bigamt( "01", 60, fail_amt, stmp );
+            fprintf( fp, "%s|", stmp );
+            /* 失败金额 */
+            fprintf( fp, "%.2f|", fail_amt );
+            /* 打印次数 */
+            /* 登记网银流水表backup8字段，记账登记101-107位 手续费登记108-114位 代发登记115-121位 代发失败登记122-128位 */
+            memset( spno, 0x00, sizeof( spno ) );
+            num = 0;
+            no_proc( trim( ptmp->dtl.backup8 ), 121, spno, &num ); 
+            WriteLog( ERR_LVL, "spno[%s], num[%d] 代发失败凭证打印", spno, num );
+            fprintf( fp, "%d|", num );
+            fprintf( fp, "||\n" );
+        }
+        if ( strncmp( code, "6381", 4 ) == 0 )
+        {
+            memset( date1, 0x00, sizeof( date1 ) );
+            strcpy( date1,ptmp->dtl.trandate );
+            memset( seq1, 0x00, sizeof( seq1 ) );
+            strcpy( seq1, ptmp->dtl.seqno );
+            WriteLog( ERR_LVL, "date1[%s], seqno[%s] buckup8[%s]\n", date1, seq1, spno );
+            EXEC SQL update t_pb_net_dtl set backup8 = :spno where trandate = :date1 and seqno = :seq1;
+            if( SQLCODE || sqlca.sqlerrd[2] != 1 )
+            {
+                ERREXP( "更新网银流水表出错!" );
+                WriteLog( ERR_LVL, "sqlcode[%ld] sqlerrd[%ld]\n", sqlca.sqlcode, sqlca.sqlerrd[2] );
+                EXEC SQL rollback work; 
+                if( sqlca.sqlcode != 0 )
+                {
+                    WriteLog( ERR_LVL, "rollback work error [%d]", sqlca.sqlcode );
+                    fclose( fp );
+                    return -1;
+                }
+                fclose( fp );
+                return -1;
+            }
+        }
+        ptmp = ptmp->next;
+        i++;
+    }
+    if ( strncmp( code, "6381", 4 ) == 0 )
+    {
+        fclose( fp );
+        memset( fmtfile, 0x00, sizeof( fmtfile ) );
+        memset( filename, 0x00, sizeof( filename ) );
+        if ( strcmp( code, "638101" ) == 0 )
+        {
+            sprintf( fmtfile, "%s/fmt/wy_cert_prt.cf", getenv( "HOME" ) );
+            sprintf( filename, "%s/wy_cert_prt_%s_%s.rpt", dirname, tran_date, _seq_no );
+        }
+        if ( strcmp( code, "638102" ) == 0 )
+        {
+            sprintf( fmtfile, "%s/fmt/wy_fee_prt.cf", getenv( "HOME" ) );
+            sprintf( filename, "%s/wy_cert_prt_sxf_%s_%s.rpt", dirname, tran_date, _seq_no );
+        }
+        if ( strcmp( code, "638103" ) == 0 )
+        {
+            sprintf( fmtfile, "%s/fmt/wy_agt_prt.cf", getenv( "HOME" ) );
+            sprintf( filename, "%s/wy_cert_prt_agt_%s_%s.rpt", dirname, tran_date, _seq_no );
+        }
+        if ( strcmp( code, "638104" ) == 0 )
+        {
+            sprintf( fmtfile, "%s/fmt/wy_agtsb_prt.cf", getenv( "HOME" ) );
+            sprintf( filename, "%s/wy_cert_prt_agtsb_%s_%s.rpt", dirname, tran_date, _seq_no );
+        }
+        ret = Cert_Print( fmtfile, datafile, filename, 32 );
+        if( ret )
+        {
+            ERREXP( "生成打印文件错!" );
+            EXEC SQL rollback work; 
+            if( sqlca.sqlcode != 0 )
+            {
+                WriteLog( ERR_LVL, "rollback work error [%d]", sqlca.sqlcode );
+                return -1;
+            }
+            return -1;
+        }
+        memset( sfile, 0x00, sizeof( sfile ) );
+        if ( strcmp( code, "638101" ) == 0 )
+            sprintf( sfile, "wy_cert_prt_%s_%s.rpt", tran_date, _seq_no );
+        if ( strcmp( code, "638102" ) == 0 )
+            sprintf( sfile, "wy_cert_prt_sxf_%s_%s.rpt", tran_date, _seq_no );
+        if ( strcmp( code, "638103" ) == 0 )
+            sprintf( sfile, "wy_cert_prt_agt_%s_%s.rpt", tran_date, _seq_no );
+        if ( strcmp( code, "638104" ) == 0 )
+            sprintf( sfile, "wy_cert_prt_agtsb_%s_%s.rpt", tran_date, _seq_no );
+        PutPoolDataByName( "ABSHEAD", "recv_filename", 0, 0, sfile, 0 ); 
+        EXEC SQL commit work; 
+        if( sqlca.sqlcode != 0 )
+        {
+            WriteLog( ERR_LVL, "commit work error [%d]", sqlca.sqlcode );
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/* 6381 打印交易 */
+long Wy_Gm_Cert_Prt()
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+        char _tlr_no[100 + 1];
+        char inst_no[100 + 1];
+        char tran_date[100 + 1];
+        char bgn_date[100 + 1];
+        char end_date[100 + 1];
+        char acc[100 + 1];
+        char sccin_no[100 + 1];
+        char prt_type[100 + 1];
+        char chnlseqno[100 + 1];
+        char btchnb[20 + 1];
+        char bat_no[20+1];
+        char prt_flag[100 + 1];
+        char yr_flag[100 + 1];
+        long bgn_rec_no = 0;
+        char flag[100 + 1];
+        char seq[100 + 1];
+        char tranflag[100 + 1];
+        char scode[100 + 1];
+    EXEC SQL END DECLARE SECTION;
+    pdlink pret = NULL;
+
+    memset( _tlr_no, 0x00, sizeof(_tlr_no) );
+    memset( inst_no, 0x00, sizeof(inst_no) );
+    memset( tran_date, 0x00, sizeof(tran_date) );
+    memset( bgn_date, 0x00, sizeof(bgn_date) );
+    memset( end_date, 0x00, sizeof(end_date) );
+    memset( acc, 0x00, sizeof(acc) );
+    memset( sccin_no, 0x00, sizeof(sccin_no) );
+    memset( prt_type, 0x00, sizeof(prt_type) );
+    memset( chnlseqno, 0x00, sizeof(chnlseqno) );
+    memset( btchnb, 0x00, sizeof(btchnb) );
+    memset( bat_no, 0x00, sizeof(bat_no) );
+    memset( prt_flag, 0x00, sizeof(prt_flag) );
+    memset( yr_flag, 0x00, sizeof(yr_flag) );
+    memset( flag, 0x00, sizeof(flag) );
+    memset( seq, 0x00, sizeof(seq) );
+    memset( tranflag, 0x00, sizeof(tranflag) );
+    memset( scode, 0x00, sizeof(scode) );
+    
+    /* 取柜面上送值到变量 */
+    if ( get_value( _tlr_no, inst_no, tran_date, bgn_date, end_date, acc,
+                sccin_no, prt_flag, yr_flag, &bgn_rec_no, prt_type,
+                chnlseqno, btchnb, bat_no ) < 0 )
+    {
+        ERREXP( "get_value error!" );
+        return -1;
+    }
+    /* 打印类别 */
+    /* 单笔打印 */
+    memset( seq, 0x00, sizeof( seq ) );
+    if( prt_flag[0] == '2' )
+    {
+        memset( bgn_date, 0x00, sizeof( bgn_date ) );
+        GetPoolDataByName( "PAGTBUF", "tran_date", 0, 0, bgn_date, 0 );
+        memset( end_date, 0x00, sizeof( end_date ) );
+        GetPoolDataByName( "PAGTBUF", "tran_date", 0, 0, end_date, 0 );
+        GetPoolDataByName( "PAGTBUF", "passwd", 0, 0, seq, 0 );
+    }
+    /* 0-记账凭证打印 2-手续费凭证打印 1-代发凭证打印 3-代发失败凭证打印 */
+    if ( prt_type[0] == '0' || prt_type[0] == '2' )
+    {
+        /* 记账和手续费没有代理编号 */
+        strcpy( btchnb, "" );
+        strcpy( bat_no, "" );
+    }
+    /* tranflag 638001 - 账务查询 638002 - 手续费查询 638003 - 代发查询 638004 - 代发失败查询 */
+    memset( tranflag, 0x00, sizeof( tranflag ) );
+    if ( prt_type[0] == '0' )
+        strcpy( tranflag, "638001" );
+    if ( prt_type[0] == '2' )
+        strcpy( tranflag, "638002" );
+    if ( prt_type[0] == '1' )
+        strcpy( tranflag, "638003" );
+    if ( prt_type[0] == '3' )
+        strcpy( tranflag, "638004" );
+    /* 查询记账明细到内存 */
+    memset( flag, 0x00, sizeof( flag ) );
+    if ( ( pret = pub_query( bgn_date, end_date, inst_no,
+         acc, chnlseqno, yr_flag,
+         bgn_rec_no, PAGENO, flag, "0", seq, btchnb, bat_no, tranflag ) ) == NULL )
+    {
+        ERREXP( "pub_query error!" );
+        /* 释放pret */
+        freelink( pret );
+        return -1;
+    }
+    memset( scode, 0x00, sizeof( scode ) );
+    if ( prt_type[0] == '0' )
+    {
+        /* 记账查询返回处理 */ 
+        strcpy( scode, "638101" );
+    }
+    if ( prt_type[0] == '2' )
+    {
+        /* 手续费查询返回处理 */ 
+        strcpy( scode, "638102" );
+    }
+    if ( prt_type[0] == '1' )
+    {
+        /* 代发凭证打印返回处理 */
+        strcpy( scode, "638103" );
+    }
+    if ( prt_type[0] == '3' )
+    {
+        /* 代发凭证打印失败返回处理 */
+        strcpy( scode, "638104" );
+    }
+    if ( pub_return_proc( pret, inst_no, bgn_rec_no, _tlr_no, flag, scode, tran_date ) < 0 )
+    {
+        ERREXP( "pub_return_proc error!" );
+        /* 释放pret */
+        freelink( pret );
+        return -1;
+    }
+    /* 释放pret */
+    freelink( pret );
+    return 0;
+}
+
+int proc_half_char(char *_source)
+{
+    char *p = _source;
+
+    while( (*p != '\0') && (*p != '(' ) )
+        p++;
+    *p = '\0';
+}
+

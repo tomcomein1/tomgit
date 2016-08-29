@@ -1,0 +1,435 @@
+/*****************************************************
+**函数描述     : 核心交易流水查证前处理 
+**函数用途     : 根据流水号日期查找账号
+**输入         ：流水号  日期
+**输出         : 账号 
+**创建日期     ：2010/10/20
+**最后修改日期 ：
+**Create by    : zhaofeng
+*****************************************************
+  Modified    Date
+  Ma Shaojie   20151020
+*****************************************************/
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <time.h>
+#include "pbconstval.h"
+#include "pbstructdef.h"
+#ifdef ORACLE_DATABASE
+EXEC SQL include "pbranchdb.h";
+#else
+#include "pbranchdb.h"
+#endif
+#include "pberrlog.h"
+#include "pbglbvardef.h"
+#include "pbbasefunc.h"
+/**add by sqf 20110419 for 跨行转账处理**/
+#include "pbsrv.h"
+/**add by sqf 20110419 end for 跨行转账处理**/
+#include "b_dbbuf.h"    /*add by wangou*/
+/*Add For Sc6000z By Wenfeng*/
+#include <stddef.h>
+#include "zpqds.h" /*ZPQDS查询用头文件*/
+
+
+EXEC SQL  include "pb_s_agt_batch.h";
+
+int
+CbsJnlStatQry()
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+	char chnlseqno[32+1];
+	char commitdt[10+1];
+	char acct[32+1];
+	char no[10+1];
+	char err_code[6+1];
+	char err_msg[256+1];
+	char time[8+1];
+	char seqno[10+1];
+	char stat[20+1];
+	char jnl_time[23+1];
+	double fee = 0;
+	double totalfee = 0;
+	char result[80+1];
+	/**add by sqf 20110510 for 跨行转账处理**/
+	struct s_pb_net_dtl net_dtl;
+	char proc_flag[2+1];
+	char tran_date[10+1];
+	char tran_date1[10+1];
+	/**add by sqf 20110510 end for 跨行转账处理**/
+	struct s_cnap_queue cnap_queue; /*add by wangou*/
+	EXEC SQL END DECLARE SECTION;
+	long core_err_no = 0;
+	long ret = 0;
+	char nowdate[10+1];
+	long ndate = 0;
+	long date = 0;
+	long hoststat = 0;
+	char tfee[20+1];
+	char afee[20+1];
+	/**add by sqf 20110510 for 跨行转账处理**/
+	long errcode = 0;
+	/**add by sqf 20110510 end for 跨行转账处理**/
+	/**add by sqf 20111226 for 日期+1处理 begin **/
+	int i_pb_date; 
+	/**add by sqf 20111226 for 日期+1处理 end **/
+	int n_pb_date=0,tr_pb_date=0;
+	
+	char pb_tyzf[32+1];
+	int  tyzf_flag = 0;
+
+	/* Modify For SC6000z-ZPQDS Begin By Wenfeng 2013/07/03 */
+	struct tag_cbs st_cbs;
+	struct stTranStat
+	{
+		 char tran_stat[1+1];
+	};
+ 	struct stTranStat ureg;
+
+	/*检查交易状态是否正常结构描述*/
+	ZPQDS_RecDesc descArray[] = 
+	{
+		 { offsetof( struct stTranStat, tran_stat), 'C', 1}
+	};
+	
+	memset(&ureg, 0x00, sizeof(struct stTranStat));
+	memset ( &st_cbs, 0, sizeof ( struct tag_cbs));
+	/* Modify For SC6000z-ZPQDS End By Wenfeng 2013/07/03 */
+
+	memset( chnlseqno, 0x00, sizeof( chnlseqno ));
+	memset( nowdate, 0x00, sizeof( nowdate ));
+	memset( commitdt, 0x00, sizeof( commitdt ));
+	memset( acct, 0x00, sizeof(acct) );
+	memset( err_code, 0x00, sizeof(err_code) );
+	memset( err_msg, 0x00, sizeof(err_msg) );
+	memset( time, 0x00, sizeof(time) );
+	memset( seqno, 0x00, sizeof(seqno) );
+	memset( stat, 0x00, sizeof(stat) );
+	memset( jnl_time, 0x00, sizeof(jnl_time) );
+	memset( result, 0x00, sizeof( result ));
+	memset( tfee, 0x00, sizeof( tfee ));
+	memset( afee, 0x00, sizeof( afee ));
+	/**add by sqf 20110510 for 跨行转账处理**/
+	memset( &net_dtl, 0x00, sizeof( struct s_pb_net_dtl ) );
+	memset( proc_flag, 0x00, sizeof( proc_flag ));
+	/**add by sqf 20110510 end for 跨行转账处理**/
+	memset( &cnap_queue, 0x00, sizeof( struct s_cnap_queue ) ); /*add by wf*/
+	memset( pb_tyzf, 0x00, sizeof( pb_tyzf ) );
+
+	/* 从变量池取值 */
+	GetPoolDataByName("BUSIIB","chnlSeqNb",0,0,chnlseqno,0);
+	GetPoolDataByName("BUSIIB","commitDt",0,0,commitdt,0);
+	rtrim(chnlseqno);
+	rtrim(commitdt);
+	
+	ret = PayGetPbDate( nowdate );
+	if( ret < 0 )
+	{
+		WriteLog(ERR_LVL,"取PB日期失败!\n");
+		core_err_no = 99999;	
+		PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&core_err_no,0);
+		PutPoolDataByName("ABSHEAD","_error_code", 0, 0, "取PB系统时间失败",0);
+		return( -1 );	
+	}
+	WriteLog( ERR_LVL, "PBDATE=[%s]", nowdate);
+	ndate = atol( nowdate );
+	WriteLog( ERR_LVL, "PBDATE=[%s] PBDATE2=[%ld]", nowdate, ndate );
+	
+	WriteLog( ERR_LVL, "chnlseqno[%s] commitdt[%s]", chnlseqno, commitdt );
+	/* 查找流水对应的交易日期  */
+	EXEC SQL SELECT * INTO :net_dtl
+		FROM t_pb_net_dtl
+		WHERE chnlseqno = :chnlseqno
+		AND wy_date = :commitdt;
+		if( sqlca.sqlcode != 0)
+		{
+			if( sqlca.sqlcode == 100)
+			{
+				/** Modified by MSJ for 企业网银二期改造项目 20151010 - Start **/
+				WriteLog( ERR_LVL, "行内无有此网银流水号，需向统一支付平台查询");
+				/**add by sqf 20130206 for 没有查到记录时要返回给网银失败 begin**/
+				PutPoolDataByName("BUSIIB","hostSeqStat", 0, 0, "2",0);
+				strcpy( err_msg, "无此网银流水号！" );
+				PutPoolDataByName("BUSIIB","errRes", 0, 0, err_msg,0);
+				return ( 0 );
+				/**add by sqf 20130206 for 没有查到记录时要返回给网银失败 end**/
+				/** Modified by MSJ for 企业网银二期改造项目 20151010 - End **/
+			}
+			else
+			{
+				strcpy( err_code, "390014");
+				strcpy( err_msg,"查询网银流水表失败");
+				WriteLog( ERR_LVL, "%s[%d]", err_msg, sqlca.sqlcode);
+				PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, err_code, 0 );
+				PutPoolDataByName( "BUSIIB", "thsdesc", 0, 0, err_msg, 0 );
+				core_err_no = 99999;
+				PutPoolDataByName( "ABSHEAD","app_err_no", 0, 0, &core_err_no, 0);
+				PutPoolDataByName("ABSHEAD","_error_code", 0, 0, err_msg,0);
+				return( -1 );
+			}
+		}
+	/**add by sqf 20110510 for 跨行转账处理**/
+	strcpy( time, net_dtl.trandate );
+	/**add by sqf 20110510 end for 跨行转账处理**/
+		rtrim( time );
+		date = atol(time);
+		WriteLog( ERR_LVL, "TRANDATE=[%s] [%ld] outtrancode[%s]", time, date, net_dtl.outtrancode );
+	/**add by sqf 20110510 for 跨行转账处理**
+	if( strcmp( net_dtl.outtrancode, "CBS0000110" ) != 0 || strlen( net_dtl.transchnl) == 0 )
+	**/
+	if( (strcmp(net_dtl.outtrancode,"CBS0000110")!=0) && (strcmp(net_dtl.outtrancode,"CBS0000100")!=0) )
+	{
+		    /**add by sqf 20110510 end for 跨行转账处理**/
+		    /* 输入日期小于当前日期，则查询网银表返回 */
+		    if( date < ndate )
+		    {
+		    	/**modify by sqf for 手续费为实际向客户收取的手续费 20110705 begin**
+		    	EXEC SQL SELECT seqno,transtats,transamt,fee,result INTO :seqno,:stat,:totalfee,:fee,:result
+		    	**/
+		    	EXEC SQL SELECT seqno,transtats,transamt,fee1,result INTO :seqno,:stat,:totalfee,:fee,:result
+		    	/**modify by sqf for 手续费为实际向客户收取的手续费 20110705 end**/
+		    		FROM t_pb_net_dtl
+		    		WHERE chnlseqno = :chnlseqno; 
+		    	if( sqlca.sqlcode != 0 )
+		    	{
+		    		if( sqlca.sqlcode == 100)
+		    		{	
+		    			WriteLog( ERR_LVL, "无此网银流水号[%s]", chnlseqno );
+		    			PutPoolDataByName("BUSIIB","hostSeqStat", 0, 0, "2",0);
+		    			strcpy( err_msg, "无此网银流水号！" );
+		    			PutPoolDataByName("BUSIIB","errRes", 0, 0, err_msg,0);
+		    			return ( 0 );
+		    		} 
+		    		else
+		    		{
+		    			strcpy( err_code, "390014");
+		    			strcpy( err_msg,"查询网银流水表失败");
+		    			WriteLog( ERR_LVL, "%s[%d]", err_msg, sqlca.sqlcode);
+		    			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, err_code, 0 );
+		    			PutPoolDataByName( "BUSIIB", "thsdesc", 0, 0, err_msg, 0 );
+		    			core_err_no = 99999;
+		    			PutPoolDataByName( "ABSHEAD","app_err_no", 0, 0, &core_err_no, 0);
+		    			PutPoolDataByName("ABSHEAD","_error_code", 0, 0, err_msg,0);
+		    			return( -1 );
+		    		}
+		    	}
+		    	WriteLog(ERR_LVL,"stat=[%s]",stat);
+		    	rtrim(stat);
+		    	if( stat[0] == '0') 
+		    	{
+		    		PutPoolDataByName("BUSIIB","hostSeqStat", 0, 0, "1",0);
+		    	}
+		    	else
+		    	{
+		    		PutPoolDataByName("BUSIIB","hostSeqStat", 0, 0, "2",0);
+		    	}
+		    	sprintf(tfee,"%f",totalfee);
+		    	sprintf(afee,"%f",fee);
+		    	PutPoolDataByName( "BUSIIB","hostSeqNb", 0, 0, seqno, 0);
+		    	PutPoolDataByName( "BUSIIB","errRes", 0, 0, result, 0);
+		    	PutPoolDataByName( "BUSIIB","realTotalFee", 0, 0, tfee, 0);
+		    	PutPoolDataByName( "BUSIIB","realManFee", 0, 0, afee, 0);
+		    	
+		    	return( 0 );
+		    }
+		    /* 输入日期等于当前日期，则做数据处理调用通用业务服务 */
+		    /* 查询网银流水表 */
+		    else if( date == ndate)
+		    {
+		    	/**modify by sqf for 手续费为实际向客户收取的手续费 20110705 begin**
+		    	EXEC SQL SELECT payacc,seqno,fee INTO :acct,:no,:fee
+		    	**/
+		    	EXEC SQL SELECT payacc,seqno,fee1 INTO :acct,:no,:fee
+		    	/**modify by sqf for 手续费为实际向客户收取的手续费 20110705 end**/
+		    		FROM t_pb_net_dtl
+		    		WHERE chnlseqno = :chnlseqno;
+		    	if(sqlca.sqlcode != 0)
+		    	{
+		    		WriteLog( ERR_LVL, "查询失败[%d]", sqlca.sqlcode );
+		    		if( sqlca.sqlcode == 100)
+		    		{	
+		    			WriteLog( ERR_LVL, "无此网银流水号！");
+		    			PutPoolDataByName("BUSIIB","hostSeqStat", 0, 0, "2",0);
+		    			strcpy( err_msg, "无此网银流水号！" );
+		    			PutPoolDataByName("BUSIIB","errRes", 0, 0, err_msg,0);
+		    			return ( 0 );
+		    		} 
+		    		else
+		    		{
+		    			strcpy( err_code, "390014" );
+		    			strcpy( err_msg, "查询网银流水表失败!" );
+		    			WriteLog( ERR_LVL, "%s[%d]", err_msg, sqlca.sqlcode);
+		    			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, err_code, 0 );
+		    			PutPoolDataByName( "BUSIIB", "thsdesc", 0, 0, err_msg, 0 );
+		    			core_err_no = 99999;
+		    			PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, &core_err_no,0);
+		    			PutPoolDataByName("ABSHEAD","_error_code", 0, 0, err_msg,0);
+		    			return( -1 ); 
+		    		}
+		    	}
+		    	rtrim( no );
+		    	/* 将渠道流水号存入变量transSeqNb */
+		    	WriteLog( TEST_LVL,"transSeqNb[%s]",chnlseqno);
+		    	PutPoolDataByName("BUSIIB","transSeqNb", 0, 0, chnlseqno,0);
+		    	/* 将查到的TT流水号赋给报文体 */
+		    	WriteLog( TEST_LVL,"chnlSeqNo[%s]", no);
+		    	PutPoolDataByName("BUSIIB","chnlSeqNb", 0, 0, no,0);
+		    	/* 将日期赋回报文体 */
+		    	WriteLog( TEST_LVL,"commitDt[%s]",commitdt);
+		    	PutPoolDataByName("BUSIIB","commitDt", 0, 0, time,0);
+		    	rtrim(acct);
+		    	/* 将查询到的账号赋给报文体 */
+		    	WriteLog( TEST_LVL,"Acct[%s]", acct);
+		    	PutPoolDataByName("BUSIIB","payAcct", 0, 0, acct,0);
+		    	/* 给交易状态赋默认值 */
+		    	PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		    	
+		    	/* Modify For SC6000z-ZPQDS Begin By Wenfeng 2013/07/03 */
+		    	/* 给核心需要的报头字段赋值 * /
+		    	PutPoolDataByName("ABSHEAD","_tx_code", 0, 0, "5004",0);
+		    	ret = CommClient("QryEntySvr");
+		    	WriteLog( ERR_LVL,"ret=[%d]", ret);
+		    	if( ret != 0 )
+		    	{
+		    		WriteLog(ERR_LVL,"调用通用业务服务：核心交易流水查证失败！");	
+		    		/ *core_err_no = 99999;
+		    		PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&core_err_no,0);
+		    		PutPoolDataByName("ABSHEAD","_error_code", 0, 0, "调用核心流水查证服务失败",0);* /
+		    		return( -1 );
+		    	}
+		    	sprintf(afee,"%f",fee);
+		    	PutPoolDataByName("BUSIIB","realManFee", 0, 0, afee,0);
+		    	GetPoolDataByName("ABSHEAD","_host_stat",0,0, (char *)&hoststat,0);*/
+		    	/* ZPQDS用CBS变量池备份 */
+		    	cbs_backup(&st_cbs);
+		    	/* ZPQDS查询条件编辑 */
+		    	PutPoolDataByName("CBS", "PaperNo", 0, 0, no, 0);
+		    	PutPoolDataByName("CBS", "FpDate", 0, 0, time, 0);
+		    	/* ZPQDS查询 */
+		    	ret = ZPQDS_Query("9996", "Q047", &ureg, &descArray[0], NELEMS(descArray));
+		    	if(ret != 100 && ret != 0)
+		    	{
+		    		WriteLog ( ERR_LVL, "查询主机记帐记录出错[%d]", ret);
+		    		return ( -1);
+		    	}
+  	    
+		    	/* ZPQDS用CBS变量池还原 */
+		    	cbs_recover(&st_cbs);
+		    	if ( ret < 0 )
+		    	{
+		    		WriteLog ( ERR_LVL, "调用PQDS查询出错[%d]", ret);
+		    		return (-1);
+		    	}
+		    	/*打印结果值*/
+		    	WriteLog(DEBUG_LVL0, "记账结果状态[%s]", ureg.tran_stat);
+  	    
+		    	if(ureg.tran_stat[0] == '0') /*正常*/
+		    	{
+		    		PutPoolDataByName("BUSIIB","hostSeqStat", 0, 0, "1",0);
+		    	}
+		    	else
+		    	{
+		    		PutPoolDataByName("BUSIIB","hostSeqStat", 0, 0, "2",0);
+		    	}
+		    	/* Modify For SC6000z-ZPQDS End By Wenfeng 2013/07/03 */
+		    	PutPoolDataByName("ABSHEAD","_host_stat", 0, 0, (char *)&hoststat,0);
+		    	WriteLog( APP_LVL, "hoststat[%d]\n", hoststat );
+		    	return( 0 );
+		    }
+		    /* 当输入日期大于当前日期，则返回错误 */
+		    else
+		    {
+		    	WriteLog(ERR_LVL,"日期错误！");
+		    	core_err_no = 99999;
+		    	PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&core_err_no,0);
+		    	PutPoolDataByName("ABSHEAD","_error_code", 0, 0, "未来日期！",0);
+		    	return( -1 );
+		    }
+		    /**add by sqf 20110510 for 跨行转账处理**/
+	}
+	else
+	{
+		PutPoolDataByName("BUSIIB", "payBrchID", 0, 0, net_dtl.payinstno, 0);
+		WriteLog(APP_LVL, "net_dtl.payinstno=[%s]", net_dtl.payinstno);
+				
+		WriteLog( ERR_LVL, "RUN: trandate=[%s]seqno=[%s]", net_dtl.trandate, net_dtl.seqno );
+		PutPoolDataByName( "BUSIIB","hostSeqNb", 0, 0, net_dtl.seqno, 0);
+
+		/** Added by MSJ for 向统一支付平台查询跨行转账与行内转账交易 20151010 - Start **/
+		ret = pbbnet_tyzf();
+		if( ret < 0 )
+		{
+		    WriteLog( ERR_LVL, "向统一支付平台查询交易状态失败" );
+		    PutPoolDataByName( "BUSIIB", "hostSeqStat", 0, 0, "3",0 );
+		    PutPoolDataByName( "BUSIIB","errRes", 0, 0, "获取支付信息失败", 0);
+		    return ( -1 );
+		}
+		
+		memset( pb_tyzf, 0x00, sizeof( pb_tyzf ));
+		GetPoolDataByName( "BUSIIB", "curUsedPnt", 0, 0, pb_tyzf, 0 );
+		trim(pb_tyzf);
+		WriteLog( ERR_LVL, "trandate=[%s]seqno=[%s]pb_tyzf[%s]", net_dtl.trandate, net_dtl.seqno, pb_tyzf );
+
+                /** 0-失败 1-成功 2-失败 3-交易处理中 4-无此交易 5-交易异常 **/
+		if( pb_tyzf[0]=='1' )                      
+		{
+                    EXEC SQL begin work;
+		    WriteLog( ERR_LVL,"网银流水表中交易状态为失败，现修改其标志位" );
+		    EXEC SQL UPDATE t_pb_net_dtl SET transtats[1,3] = '010'
+		                 WHERE seqno = :net_dtl.seqno
+		                   AND trandate = :net_dtl.trandate;
+		    if( sqlca.sqlcode || sqlca.sqlerrd[2]!=1 )
+		    {
+		            WriteLog ( ERR_LVL, "更新数据库失败[%d][%s][%s]", sqlca.sqlcode, net_dtl.seqno, net_dtl.trandate );
+		            WriteLog( ERR_LVL, "%s[%d]", err_msg, sqlca.sqlcode);
+                            EXEC SQL rollback work;
+		    }
+                    else EXEC SQL commit work;
+
+		    WriteLog(ERR_LVL,"网银原交易成功!");
+		    PutPoolDataByName( "BUSIIB", "hostSeqStat", 0, 0, "1",0 );
+		    PutPoolDataByName( "BUSIIB","errRes", 0, 0, "交易成功", 0 );
+		}
+		else if( pb_tyzf[0]=='3' )                 /* 原交易处理中 */
+		{
+		    WriteLog(ERR_LVL,"网银原交易处理中!");
+		    PutPoolDataByName( "BUSIIB", "hostSeqStat", 0, 0, "3",0 );
+		    PutPoolDataByName( "BUSIIB","errRes", 0, 0, "交易处理中", 0 );
+		}
+		else if( pb_tyzf[0]=='4' )                 /* 无原交易流水号 */
+		{
+		    WriteLog(ERR_LVL,"无原交易流水号!");
+		    PutPoolDataByName( "BUSIIB", "hostSeqStat", 0, 0, "2",0 );
+		    PutPoolDataByName( "BUSIIB","errRes", 0, 0, "无该交易流水号", 0 );
+		}
+		else                                       /* 原交易失败 */
+		{
+		    WriteLog( ERR_LVL,"网银流水表中交易状态为失败，现修改其标志位" );
+                    memset(result, 0, sizeof(result) );
+		    GetPoolDataByName( "BUSIIB", "errRes", 0, 0, result, 0 );
+                    EXEC SQL begin work;
+		    EXEC SQL UPDATE t_pb_net_dtl SET transtats[1,3] = '011',
+                                                     result = :result
+		                 WHERE seqno = :net_dtl.seqno
+		                   AND trandate = :net_dtl.trandate;
+		    if( sqlca.sqlcode || sqlca.sqlerrd[2]!=1 )
+		    {
+		            WriteLog ( ERR_LVL, "更新数据库失败[%d][%s][%s]", sqlca.sqlcode, net_dtl.seqno, net_dtl.trandate );
+		            WriteLog( ERR_LVL, "%s[%d]", err_msg, sqlca.sqlcode);
+                            EXEC SQL rollback work;
+                    }
+                    else EXEC SQL commit work;
+
+		    WriteLog(ERR_LVL,"网银原交易失败!");
+		    PutPoolDataByName( "BUSIIB", "hostSeqStat", 0, 0, "2",0 );
+                    if (result[0] == '\0') PutPoolDataByName( "BUSIIB", "errRes", 0, 0, "交易失败", 0);
+		}
+		
+	}
+	
+	WriteLog( ERR_LVL,"============交易状态查询成功完成==========" );
+	/** Added by MSJ for 统一支付平台二期改造 20151010 - End **/
+	/** 其下原代码再不使用，已删除 **/
+	return ( 0 );
+}

@@ -1,0 +1,1002 @@
+/* out_tsfee_calculate.pc */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <time.h>
+#include "pbconstval.h"
+#include "pbstructdef.h"
+#ifdef ORACLE_DATABASE
+EXEC SQL include "pbranchdb.h";
+#else
+#include "pbranchdb.h"
+#endif
+#include "pberrlog.h"
+#include "pbglbvardef.h"
+#include "pbbasefunc.h"
+EXEC SQL include "beps_pub.h";
+
+#define STR_NAME(S) #S
+
+#define CHECK_NULL(STR) do{ \
+     if (strlen(STR) == 0)  \
+	 {                      \
+		WriteLog( ERR_LVL, "必输项 [%s] = [%s] 为空", STR_NAME(STR), STR ); \
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0);            \
+		PutPoolDataByName( "BUSIIB", "thsdesc", 0, 0, "必输项为空", 0);     \
+		return -1;          \
+	 }                      \
+}while (0);
+
+char *get_mid_str(char *_source, int _s_sep, int _e_sep, char *_dest);
+char *get_str_usesep(char *_source, int _sep, char *_dest);
+char *replace(char *source, char *sub, char *rep);
+
+#define EXP_STR_LEN 129
+#define AMT_STR_LEN 22
+
+/*手续费规则定义*/
+EXEC SQL BEGIN DECLARE SECTION;
+    struct t_pb_fee_rule
+    {
+        char busi_type[10 + 1]; /*业务类型 700-企业网银,贴膜卡 705-超网 */
+        char chnl_no[2 + 1];  /*渠道类型 0-全渠道 1-大额 2-小额 5-行内 6-超网 */
+        long seri_no;         /*手续费编号 唯一标志*/
+        char begin_date[8 + 1]; /*手续费免费开始日期*/
+        char end_date[8 + 1]; /*手续费免费结束日期*/
+        char free_rule_exp[128 + 1]; /*免费规则表达式
+    	-- PROD=() 按产品
+    	-- ORG=()  按机构
+    	-- ACCT=() 按账号
+        -- ATTR=() 按属性  0-对私 1-对公
+    	-- 可以组合 PROD=(prod1, prod2,...) & ORG=(org1, org2, ...) */
+        char calc_rule_exp[128 + 1]; /*收费规则表达式
+    	-- AMT=(0-1000):FEE=AMT*0.05;
+	    -- AMT=(1000000-):FEE=5.5; */
+        char mark[1 + 1];      /* 1-生效 0-失效 */
+        char conf_explain[128 + 1];    /*配置说明说明*/
+    };
+EXEC SQL END DECLARE SECTION;
+
+/*手续费输入接口*/
+struct fee_interface_in
+{
+    char openinst[13];   /**原开户机构*/
+    char instno[13];   /**机构全码 */
+    char prodno[12];  /*产品编号*/
+    char acctno[32];  /*账号*/
+    char acc_attr[4]; /*账户属性*/
+    double amt;       /*交易金额*/
+};
+
+/* 农信银网银试算输入接口 */
+/****************************************
+卡账号标志	cardAcctFlg	S(2)	M
+转出卡号/账号	payCardAcctNb	S(32)	M
+转出币种	payCurTyp	S(6)	M
+转出钞汇标志	payCashFlg	S(2)	O
+转出客户名称	payCustNm	S(128)	M
+转出账户开户网点号	payBrchID	S(32)	O
+转出账户开户网点名称	payBrchNm	S(128)	O
+是否校验密码	chkPwdFlg	S(2)	M
+密码类型	pwdTyp	S(2)	当校验转出卡/账号密码是必输
+密码	pwd	S(128)	当校验转出卡/账号密码时必输
+转账渠道	transferChnl	S(2)	O
+加急标志	fastFlg	S(2)	O
+落地标志	manualFlg	S(2)	O
+转入账号	rcvAcct	S(32)	M
+转入户名	rcvCustNm	S(128)	M
+转入行行号	rcvAcctSvcr	S(32)	O
+转入行行名	rcvAcctSvcrNm	S(128)	O
+转出金额	transAmt	D(16，2)	M
+****************************************/
+
+struct pkg_cbs0000120
+{
+    char    cardAcctFlg[2 + 1];
+    char    payCardAcctNb[32 + 1];
+    char    payCurTyp[6 + 1];
+    char    payCashFlg[2 + 1];
+    char    payCustNm[128 + 1];
+    char    payBrchID[32 + 1];
+    char    payBrchNm[128 + 1];
+    char    chkPwdFlg[2 + 1];
+    char    pwdTyp[2 + 1];
+    char    pwd[128 + 1];
+    char    transferChnl[2 + 1];
+    char    fastFlg[2 + 1];
+    char    manualFlg[2 + 1];
+    char    rcvAcct[32 + 1];
+    char    rcvCustNm[128 + 1];
+    char    rcvAcctSvcr[32 + 1];
+    char    rcvAcctSvcrNm[128 + 1];
+    char    transAmt[16 + 1];
+};
+
+/* 农信银网银试算输出接口 */
+/*********************************************
+应收费总金额	needTotalFee	D(16，2)	M
+应收邮电费额	needPostFee	D(16，2)	O
+应收手续费金额	needManFee	D(16，2)	O
+*********************************************/
+struct pkg_cbs0000121
+{
+    char    needTotalFee[16 + 1];
+    char    needPostFee[16 + 1];
+    char    needManFee[16 + 1];
+    double  fee;         /* 计算出的手续费*/
+    int     isFreeFlag;  /* 0-免费 1-收费 */
+};
+
+/*手续费试算主函数入口*/
+int OutTsfeeCalcu()
+{
+    struct pkg_cbs0000120 pkg_in;
+    struct pkg_cbs0000121 pkg_out;
+
+    int ret = 0;
+    int err_no = 0;
+
+    memset (&pkg_in, 0x00, sizeof(pkg_in) );
+    memset (&pkg_out, 0x00, sizeof(pkg_out) );
+
+    GetPoolDataByName( "BUSIIB", "cardAcctFlg", 0, 0, pkg_in.cardAcctFlg, 0 );
+    GetPoolDataByName( "BUSIIB", "payCardAcctNb", 0, 0, pkg_in.payCardAcctNb, 0 );
+    GetPoolDataByName( "BUSIIB", "payCurTyp", 0, 0, pkg_in.payCurTyp, 0 );
+    GetPoolDataByName( "BUSIIB", "payCashFlg", 0, 0, pkg_in.payCashFlg, 0 );
+    GetPoolDataByName( "BUSIIB", "payCustNm", 0, 0, pkg_in.payCustNm, 0 );
+    GetPoolDataByName( "BUSIIB", "payBrchID", 0, 0, pkg_in.payBrchID, 0 );
+    GetPoolDataByName( "BUSIIB", "payBrchNm", 0, 0, pkg_in.payBrchNm, 0 );
+    GetPoolDataByName( "BUSIIB", "chkPwdFlg", 0, 0, pkg_in.chkPwdFlg, 0 );
+    GetPoolDataByName( "BUSIIB", "pwdTyp", 0, 0, pkg_in.pwdTyp, 0 );
+    GetPoolDataByName( "BUSIIB", "pwd", 0, 0, pkg_in.pwd, 0 );
+    GetPoolDataByName( "BUSIIB", "transferChnl", 0, 0, pkg_in.transferChnl, 0 );
+    GetPoolDataByName( "BUSIIB", "fastFlg", 0, 0, pkg_in.fastFlg, 0 );
+    GetPoolDataByName( "BUSIIB", "manualFlg", 0, 0, pkg_in.manualFlg, 0 );
+    GetPoolDataByName( "BUSIIB", "rcvAcct", 0, 0, pkg_in.rcvAcct, 0 );
+    GetPoolDataByName( "BUSIIB", "rcvCustNm", 0, 0, pkg_in.rcvCustNm, 0 );
+    GetPoolDataByName( "BUSIIB", "rcvAcctSvcr", 0, 0, pkg_in.rcvAcctSvcr, 0 );
+    GetPoolDataByName( "BUSIIB", "rcvAcctSvcrNm", 0, 0, pkg_in.rcvAcctSvcrNm, 0 );
+    GetPoolDataByName( "BUSIIB", "transAmt", 0, 0, pkg_in.transAmt, 0 );
+
+    /*必输项检查*/
+    rtrim(pkg_in.cardAcctFlg);
+    CHECK_NULL(pkg_in.cardAcctFlg);		/*卡账号标志*/
+    rtrim(pkg_in.payCardAcctNb);
+    CHECK_NULL(pkg_in.payCardAcctNb);		/*转出卡号/账号*/
+    rtrim(pkg_in.payCurTyp);
+    CHECK_NULL(pkg_in.payCurTyp);			/*转出币种*/
+    rtrim(pkg_in.payCustNm);
+    CHECK_NULL(pkg_in.payCustNm);			/*转出客户名称*/
+    rtrim(pkg_in.chkPwdFlg);
+    CHECK_NULL(pkg_in.chkPwdFlg);			/*是否校验密码*/
+    rtrim(pkg_in.rcvAcct);
+    CHECK_NULL(pkg_in.rcvAcct);			/*转入账号*/
+    rtrim(pkg_in.rcvCustNm);
+    CHECK_NULL(pkg_in.rcvCustNm);			/*转入户名*/
+    rtrim(pkg_in.transAmt);
+    CHECK_NULL(pkg_in.transAmt);			/*转出金额*/
+
+    rtrim(pkg_in.fastFlg);        /*加急标志*/
+    rtrim(pkg_in.transferChnl);   /*渠道标志*/
+    /* 小额加急走大额 */
+    if (pkg_in.fastFlg[0] == '1' && pkg_in.transferChnl[0]=='1')
+       pkg_in.transferChnl[0] = '2';  
+
+    ret = calc_fee_amt(pkg_in, &pkg_out, 1);
+    if (ret != 0)
+    {
+        WriteLog( ERR_LVL, "exec func:calc_fee_amt");
+        return -1;
+    }
+    set_return_pkg_pool(pkg_out);
+
+    return 0;
+}
+
+/* 计算手续费金额*/
+int calc_fee_amt(struct pkg_cbs0000120 pkg_in, struct pkg_cbs0000121 *pkg_out, int flag )
+{
+    int ret = 0;
+    char err_code[50 + 1];
+    char err_msg[256 + 1];
+    char tran_date[8 + 1];
+    char openinst[12 + 1];
+    char acctattr[3 + 1];
+    int  err_no = 0;
+    char c_fee[AMT_STR_LEN];
+    struct fee_interface_in face_in;
+
+    double fee = 0.00;
+
+    memset(tran_date, 0x00, sizeof(tran_date));
+    memset(err_code, 0x00, sizeof(err_code));
+    memset(err_msg, 0x00, sizeof(err_msg));
+
+    GetPoolDataByName( "PBSYS", "PbDate", 0, 0, tran_date, 0 );
+
+    ret = acc_pubqry_5711(pkg_in.payCardAcctNb);
+    if (ret != 0)
+    {
+	WriteLog( ERR_LVL, "调用5711核心交易报错！");
+	err_no = -1;
+	PutPoolDataByName( "BUSIIB", "thsdesc", 0, 0, "调用核心5711报错", 0);
+	PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&err_no, 0);
+	PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, "调用核心5711报错", 0 );
+	return -1;
+    }
+
+    memset(openinst, 0x00, sizeof(openinst) );
+    memset(&face_in, 0x00, sizeof(struct fee_interface_in) );
+    memset(acctattr, 0x00, sizeof(acctattr) );
+
+    GetPoolDataByName ("CBS", "OpenInstNo", 0, 0, openinst, 0 );
+    GetPoolDataByName ("CBS", "CertStat", 0, 0, face_in.prodno, 0 );
+    GetPoolDataByName ("CBS", "PrdNo", 0, 0, acctattr, 0 );
+
+    rtrim(openinst);
+    strcpy (face_in.openinst, openinst);
+/**取机构全码**/
+    GetInstFn( openinst, face_in.instno); 
+
+WriteLog( ERR_LVL, "RUN: openinst[%s] face_in.instno=[%s] face_in.prodno=[%s]", 
+                         openinst, face_in.instno, face_in.prodno);
+
+/****
+10-对私活期
+101-对私储蓄户
+102-对私个人结算户
+20-对私定期 
+jc_tangl(唐亮) 01-25 14:22:04
+30-对公活期
+40-对公定期
+对公的
+jc_tangl(唐亮) 01-25 14:22:10
+60-金融客户  金融机构的
+***/
+    rtrim (acctattr);
+    if (strcmp(acctattr, "30") != 0 && strcmp(acctattr, "40") )
+           strcpy (face_in.acc_attr, "0");  /* 对私 */
+    else 
+           strcpy (face_in.acc_attr, "1");  /* 对公 */
+
+    strcpy (face_in.acctno, pkg_in.payCardAcctNb);
+    face_in.amt = atof(pkg_in.transAmt);
+    print_inter_face(face_in);
+
+    pkg_out->isFreeFlag = 1;  /*收费*/
+
+    /*检查是否配置了免费规则*/
+    ret = check_fee_free("700", pkg_in.transferChnl, tran_date, face_in);
+    if (ret < 0)
+    {
+	err_no = -1;
+	strcpy( err_code, "340002" );
+        strcpy( err_msg, "取手续费免费处理错" );
+	WriteLog( ERR_LVL, "=======[%s]==========", err_msg);
+        PutPoolDataByName( "BUSIIB", "thsdesc", 0, 0, err_code, 0);
+        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, &err_no, 0);
+        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+        return -1;
+    }
+    else if (ret == 0)
+    {
+        strcpy (pkg_out->needTotalFee, "0.00");
+        strcpy (pkg_out->needPostFee, "0.00");
+        strcpy (pkg_out->needManFee, "0.00");
+        pkg_out->isFreeFlag = 0;
+    }
+    /* 手续费试算标志传入为 1 ,
+       试算时如果免费不再进行手续费计算*/
+    if (flag && pkg_out->isFreeFlag == 0) return 0;
+
+    ret = calc_fee_amt_main("700", pkg_in.transferChnl, face_in, &fee);
+    if (ret < 0)
+    {
+	err_no = -1;
+        strcpy( err_code, "340002" );
+        strcpy( err_msg, "手续费计算失败" );
+	WriteLog( ERR_LVL, "=======[%s]==========", err_msg);
+        PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, err_code, 0 );
+        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, &err_no,  0 );
+        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg,  0 );
+        return -1;
+    }
+
+    WriteLog( ERR_LVL, "计算出手续费金额：fee[%-.2lf]", fee );
+    /*取最大手续费配置*/
+    memset(c_fee, 0x00, sizeof(c_fee) );
+    ret = get_max_fee(c_fee);
+    if (ret < 0)
+    {
+        strcpy( err_code, "340002" );
+        strcpy( err_msg, "取最大手续费设置错" );
+		WriteLog( ERR_LVL, "=======[%s]==========", err_msg);
+        PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, err_code, 0 );
+        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, &err_no,  0 );
+        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg,  0 );
+        return -1;
+    }
+    else if (ret == 0)
+    {
+        /*取最大手续费配置*/
+        WriteLog( ERR_LVL, "手续费金额上限%s,实际手续费金额%-.2lf", \
+                  c_fee, fee );
+        if( fee - atof(c_fee) > 0.05 )
+        {
+            fee = atof(c_fee);
+        }
+    }
+
+    sprintf (pkg_out->needTotalFee, "%.2f", fee);
+    sprintf (pkg_out->needPostFee, "%.2f", fee);
+    sprintf (pkg_out->needManFee, "%.2f", fee);
+    pkg_out->fee = fee;       /*返回计算出的手续费金额*/
+
+    return 0;
+}
+
+/*调用核心5711交易查询产品与开户机构*/
+int acc_pubqry_5711(char *acc )
+{
+    char old_tran_no[40 + 1];
+    char old_op_stat[1 + 1];
+    char old_chnl_no[1 + 1];
+
+    long ret = 0;
+    long hoststat = 0;
+
+    memset( old_tran_no, 0x00, sizeof( old_tran_no ) );
+    memset( old_op_stat, 0x00, sizeof( old_op_stat ) );
+    memset( old_chnl_no, 0x00, sizeof( old_chnl_no ) );
+
+    GetPoolDataByName( "ABSHEAD", "chnl_no", 0, 0, old_chnl_no, 0 );
+    GetPoolDataByName( "ABSHEAD", "_tx_code", 0, 0, old_tran_no, 0 );
+    GetPoolDataByName( "ABSHEAD", "_tx_op_stat", 0, 0, old_op_stat, 0 );
+
+    PutPoolDataByName( "ABSHEAD", "chnl_no", 0, 0, "W", 0 );
+    PutPoolDataByName( "ABSHEAD", "_tx_code", 0, 0, "5711", 0 );
+    PutPoolDataByName( "ABSHEAD", "_tx_op_stat", 0, 0, "N", 0 );
+
+    PutPoolDataByName( "CBS", "Addr", 0, 0, acc, 0 );
+    WriteLog( APP_LVL, "5711查询打包[%s]", acc );
+
+    ret = Data_PackFml( "110|5711|0" );
+    if( ret )
+    {
+        WriteLog( ERR_LVL, "5711 pack err" );
+        return ( -1 );
+    }
+    ret = Comm_AcCallFmlAndUnpack( "110|PBSVC|5711|1" );
+    if( ret )
+    {
+        WriteLog( ERR_LVL, "5711发送或解包错!" );
+        return ( -1 );
+    }
+    GetPoolDataByName( "ABSHEAD", "_host_stat", 0, 0, &hoststat, 0 );
+    if( hoststat == 0 )
+    {
+        WriteLog( APP_LVL, "5711调用成功" );
+    }
+    else
+    {
+        if( hoststat == -1 )
+        {
+            WriteLog( ERR_LVL, "5711查询超时" );
+            return ( -1 );
+        }
+        else
+        {
+            WriteLog( ERR_LVL, "5711查询失败" );
+            return ( -1 );
+        }
+    }
+
+    /**还原原交易信息**/
+    PutPoolDataByName( "ABSHEAD", "chnl_no", 0, 0, old_chnl_no, 0 );
+    PutPoolDataByName( "ABSHEAD", "_tx_code", 0, 0, old_tran_no, 0 );
+    PutPoolDataByName( "ABSHEAD", "_tx_op_stat", 0, 0, old_op_stat, 0 );
+
+    return ( 0 );
+}
+
+/*取最大手续费配置*/
+int get_max_fee(char *_fee_max)
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+        char fee_max[AMT_STR_LEN];
+    EXEC SQL END DECLARE SECTION;
+
+    memset( fee_max, 0x00, sizeof(fee_max) );
+
+    EXEC SQL SELECT content INTO :fee_max
+       FROM  t_pay_sys_para
+       WHERE inst_no   = 'NET'
+       AND   data_code = 'inter_fee_max';
+    if( sqlca.sqlcode != 0 && sqlca.sqlcode != 100 )
+    {
+        WriteLog( ERR_LVL, "查询手续费金额上限错误[%d]", sqlca.sqlcode );
+        return( -1 );
+    }
+    else if( sqlca.sqlcode == 100 )
+    {
+        WriteLog( ERR_LVL, "手续费上限金额未设置[%d]", sqlca.sqlcode );
+        return 1;
+    }
+    rtrim(fee_max);
+
+    strcpy (_fee_max, fee_max);
+
+    return 0;
+}
+
+/*根据结构设置变量池的返回报文*/
+int set_return_pkg_pool(struct pkg_cbs0000121 _pkg_out)
+{
+    WriteLog( ERR_LVL, "free flag:[%d]", _pkg_out.isFreeFlag );
+    if (_pkg_out.isFreeFlag)
+    {
+         PutPoolDataByName( "BUSIIB", "needTotalFee", 0, 0, _pkg_out.needTotalFee, 0 );
+         PutPoolDataByName( "BUSIIB", "needPostFee",  0, 0, _pkg_out.needPostFee,  0 );
+         PutPoolDataByName( "BUSIIB", "needManFee",   0, 0, _pkg_out.needManFee,   0 );
+    }
+    else
+    {
+         PutPoolDataByName( "BUSIIB", "needTotalFee", 0, 0, "0.00", 0 );
+         PutPoolDataByName( "BUSIIB", "needPostFee",  0, 0, "0.00",  0 );
+         PutPoolDataByName( "BUSIIB", "needManFee",   0, 0, "0.00",   0 );
+    }
+
+    
+    /** 电信诈骗 **/
+    net_tele_fraud_qry();
+
+
+    return 0;
+}
+
+/*检查是否设置了免费规则*/
+int check_fee_free(char *_busi_type, char *_chnl_no, char *_date, struct fee_interface_in face_in)
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+        struct t_pb_fee_rule fee_rule;
+        char busi_type[10 + 1];
+        char chnl_no[2 + 1];
+        char tran_date[8 + 1];
+    EXEC SQL END DECLARE SECTION;
+
+    int ret = 0;
+
+    memset(busi_type, 0x00, sizeof(busi_type) );
+    memset(chnl_no,   0x00, sizeof(chnl_no) );
+    memset(tran_date, 0x00, sizeof(tran_date));
+
+    strcpy (busi_type, _busi_type);
+    strcpy (chnl_no, _chnl_no);
+    strcpy (tran_date, _date);
+
+    WriteLog( ERR_LVL, "busi_type[%s]chnl_no[%s]tran_date[%s]", busi_type, chnl_no, tran_date);
+    EXEC SQL declare cur_fee_rule cursor for
+             select * from t_pb_fee_rule
+              where busi_type = :busi_type
+                and (chnl_no = :chnl_no or chnl_no = '0')
+        	   and mark = '1'
+        	   and begin_date <= :tran_date
+        	   and end_date   >= :tran_date
+           order by chnl_no desc, seri_no desc;
+
+    EXEC SQL open cur_fee_rule;
+    if (sqlca.sqlcode)
+    {
+        WriteLog( ERR_LVL, "打开游标失败![%d]", sqlca.sqlcode );
+        return -1;
+    }
+
+    while (1)
+    {
+        memset(&fee_rule, 0x00, sizeof(fee_rule));
+        EXEC SQL fetch cur_fee_rule into :fee_rule;
+        if (sqlca.sqlcode == 100)
+        {
+            WriteLog( ERR_LVL, "已检查完该表配置![%d]", sqlca.sqlcode );
+            EXEC SQL close cur_fee_rule;
+            EXEC SQL free cur_fee_rule;
+            return 1;
+        }
+        else if (sqlca.sqlcode)
+        {
+            WriteLog( ERR_LVL, "select t_pb_fee_rule err.sqlca.sqlcode[%d]!", sqlca.sqlcode);
+            EXEC SQL close cur_fee_rule;
+            EXEC SQL free cur_fee_rule;
+            return -1;
+        }
+
+        trim_space_free_rule(&fee_rule);
+        /*有手续费免费规则表达式，进行匹配*/
+        if (find_sub_str (fee_rule.free_rule_exp, "ORG") || 
+            find_sub_str (fee_rule.free_rule_exp, "PROD") || 
+            find_sub_str (fee_rule.free_rule_exp, "ATTR") || 
+            find_sub_str (fee_rule.free_rule_exp, "ACCT") )
+        {
+            ret = find_free_rule(fee_rule.free_rule_exp, face_in);
+            if (ret == 0 )
+            {
+                WriteLog(APP_LVL, "已查找到手续费免费规则" );
+                print_fee_rule(fee_rule);
+                print_inter_face(face_in);
+                break;
+            }
+        }
+    }
+
+    EXEC SQL close cur_fee_rule;
+    EXEC SQL free cur_fee_rule;
+
+    return 0;
+}
+
+/*删除后空格*/
+int trim_space_free_rule(struct t_pb_fee_rule *_rule)
+{
+    rtrim(_rule->busi_type);
+    rtrim(_rule->chnl_no);
+    rtrim(_rule->free_rule_exp);
+    rtrim(_rule->calc_rule_exp);
+    rtrim(_rule->mark);
+    rtrim(_rule->conf_explain);
+    return 0;
+}
+
+/*打印该笔记录*/
+int print_fee_rule(struct t_pb_fee_rule fee_rule)
+{
+    WriteLog(APP_LVL, "fee_rule.busi_type[%s]", fee_rule.busi_type);
+    WriteLog(APP_LVL, "fee_rule.chnl_no[%s]", fee_rule.chnl_no);
+    WriteLog(APP_LVL, "fee_rule.seri_no[%d]", fee_rule.seri_no);
+    WriteLog(APP_LVL, "fee_rule.free_rule_exp[%s]", fee_rule.free_rule_exp);
+    WriteLog(APP_LVL, "fee_rule.calc_rule_exp[%s]", fee_rule.calc_rule_exp);
+    WriteLog(APP_LVL, "fee_rule.mark[%s]", fee_rule.mark);
+    WriteLog(APP_LVL, "fee_rule.conf_explain[%s]", fee_rule.conf_explain);
+    return 0;
+}
+
+int print_inter_face(struct fee_interface_in face_in)
+{
+    WriteLog(APP_LVL, "face_in.instno[%s]", face_in.instno);
+    WriteLog(APP_LVL, "face_in.prodno[%s]", face_in.prodno);
+    WriteLog(APP_LVL, "face_in.acctno[%s]", face_in.acctno);
+    WriteLog(APP_LVL, "face_in.acc_attr[%s]", face_in.acc_attr);
+    WriteLog(APP_LVL, "face_in.amt[%.2f]", face_in.amt);
+
+    return 0;
+}
+
+/*解免费表达式匹配*/
+int find_free_rule(char *free_rule_exp, struct fee_interface_in _in)
+{
+    char *fee_exp = free_rule_exp;
+    char exp_value[EXP_STR_LEN];
+    int ret = 0;
+    int org_flag = 1, prd_flag = 1, acct_flag = 1, attr_flag = 1;
+
+    WriteLog( APP_LVL, "exp[%s]", fee_exp );
+    memset (exp_value, 0x00, sizeof(exp_value) );
+
+    while (*fee_exp != '\0')
+    {
+        if (*fee_exp == ' ') fee_exp++;
+        if (!strncmp(fee_exp, "ORG", 3) && _in.instno[0])
+        {
+            memset(exp_value, 0x00, sizeof(exp_value));
+            fee_exp = get_mid_str(fee_exp, '(', ')', exp_value);
+            rtrim(exp_value);
+            org_flag = compare_value(exp_value, _in.instno );
+            if (org_flag)
+                WriteLog( APP_LVL, "ORG: fee_exp [%s]", exp_value );
+        }
+        if (!strncmp(fee_exp, "PROD", 4) && _in.prodno[0] ) 
+        {
+            memset(exp_value, 0x00, sizeof(exp_value));
+            fee_exp = get_mid_str(fee_exp, '(', ')', exp_value);
+            rtrim(exp_value);
+            prd_flag = compare_value(exp_value, _in.prodno );
+            if (prd_flag)
+                WriteLog( APP_LVL, "PROD: fee_exp [%s]", exp_value );
+        }
+        if (!strncmp(fee_exp, "ACCT", 4) && _in.acctno[0] )
+        {
+            memset(exp_value, 0x00, sizeof(exp_value));
+            fee_exp = get_mid_str(fee_exp, '(', ')', exp_value);
+            rtrim(exp_value);
+            acct_flag = compare_value(exp_value, _in.acctno );
+            if (acct_flag)
+                WriteLog( APP_LVL, "ACCT: fee_exp [%s]", exp_value );
+        }
+        if (!strncmp(fee_exp, "ATTR", 4) && _in.acc_attr[0] )
+        {
+            memset(exp_value, 0x00, sizeof(exp_value));
+            fee_exp = get_mid_str(fee_exp, '(', ')', exp_value);
+            rtrim(exp_value);
+            acct_flag = compare_value(exp_value, _in.acc_attr );
+            if (attr_flag)
+                WriteLog( APP_LVL, "ACCT: fee_exp [%s]", exp_value );
+        }
+        fee_exp++;
+    }
+
+    /*查找到数据，返回真*/
+    if (org_flag && prd_flag && acct_flag && attr_flag)
+        return 0;
+
+    return -1;
+}
+
+/*比较值是否相等*/
+int compare_value(char *_source, char *_value)
+{
+    char *p = _source;
+    char s_val[EXP_STR_LEN];
+    int  length = 0;
+
+    while (*p != '\0')
+    {
+        memset(s_val, 0x00, sizeof(s_val));
+        p = get_str_usesep(p, ',', s_val);
+        rtrim(ltrim(s_val));
+
+        if (strncmp(s_val, "ALL", 3) == 0)
+        {
+            WriteLog( ERR_LVL, "全匹配格式 gather [%s] subset[%s]", _source, _value);
+            return 1;
+        }
+
+        length = strlen(s_val);
+        if (strncmp(s_val, _value, length) == 0)
+        {
+            WriteLog( ERR_LVL, "找到相应手续费优惠信息: gather[%s] subset[%s]", _source, _value);
+            return 1;
+        }
+
+        if (p == NULL) break;
+    }
+
+    return 0;
+}
+
+
+/*按分隔符取字符串操作, 返回余下的字串*/
+char *get_mid_str(char *_source, int _s_sep, int _e_sep, char *_dest)
+{
+    char *p = _source;
+    int i = 0;
+
+    while( (*p != '\0') && (*p != _s_sep) && (*p != '=' ) )
+        p++;
+
+    /*去空格等号与_s_sep处理*/
+    while (*p == '=' || *p == ' ' || *p == _s_sep) p++;
+
+    while(*p != '\0')
+    {
+        if (*p==_e_sep || *p=='&') break; 
+
+        _dest[i] = *p;
+        i++;
+        p++;
+    }
+    if (*p != '\0') p++;
+
+    _dest[i] = '\0';
+
+    return ( (*p != '\0') ? p : NULL);
+}
+
+/*按分隔符取字符串操作, 返回余下的字串*/
+char *get_str_usesep(char *_source, int _sep, char *_dest)
+{
+    char *p = _source;
+    int i = 0;
+
+    while(*p != '\0')
+    {
+        if (*p == _sep) break;
+        _dest[i] = *p;
+        i++;
+        p++;
+    }
+    if (*p != '\0') p++;
+
+    _dest[i] = '\0';
+
+    return ( (*p != '\0') ? p : NULL);
+}
+
+/*计算手续费金额*/
+int calc_fee_amt_main(char *_busi_type, char *_chnl_no, struct fee_interface_in face_in, double *fee)
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+        struct t_pb_fee_rule fee_rule;
+        char busi_type[10 + 1];
+        char chnl_no[2 + 1];
+        char openinst[13];
+        char content[251];
+    EXEC SQL END DECLARE SECTION;
+
+    int ret = 0;
+    double rate=0.00;
+
+    memset(busi_type, 0x00, sizeof(busi_type) );
+    memset(chnl_no,   0x00, sizeof(chnl_no) );
+    memset(openinst,   0x00, sizeof(openinst) );
+    memset(content, 0x00, sizeof(content) );
+
+    strcpy (openinst, face_in.openinst);
+    strcpy (busi_type, _busi_type);
+    strcpy (chnl_no, _chnl_no);
+/** 查找折扣率 **/
+    EXEC SQL select content into :content from t_pay_sys_para
+              where inst_no = 'NET'
+                and data_code = :openinst;
+    if (sqlca.sqlcode && sqlca.sqlcode != 100)
+    {
+        WriteLog( ERR_LVL," find rate error. t_pay_sys_para[%d]", sqlca.sqlcode );
+        return -1;
+    }
+    else if (sqlca.sqlcode == 100)
+    {
+        rate = 10.00;
+    }
+    else 
+    {
+        rtrim(content);
+        rate = atof(content);
+    }
+WriteLog( ERR_LVL,"  RUN: rate=[%.2f]. openinst[%s]", rate, openinst );
+
+    WriteLog( ERR_LVL, "busi_type[%s]chnl_no[%s]", busi_type, chnl_no);
+    EXEC SQL declare cur_fee_rule1 cursor for
+             select * from t_pb_fee_rule
+              where busi_type = :busi_type
+                and (chnl_no = :chnl_no or chnl_no = '0')
+        	   and mark = '1'
+           order by chnl_no desc, seri_no desc;
+
+    EXEC SQL open cur_fee_rule1;
+    if (sqlca.sqlcode)
+    {
+        WriteLog( ERR_LVL, "打开游标失败![%d]", sqlca.sqlcode );
+        return -1;
+    }
+
+    while (1)
+    {
+        memset(&fee_rule, 0x00, sizeof(fee_rule));
+        EXEC SQL fetch cur_fee_rule1 into :fee_rule;
+        if (sqlca.sqlcode == 100)
+        {
+            WriteLog( ERR_LVL, "已检查完该配置表未找到收费规则配置![%d]", sqlca.sqlcode );
+            EXEC SQL close cur_fee_rule1;
+            EXEC SQL free cur_fee_rule1;
+            return -1;
+        }
+        else if (sqlca.sqlcode)
+        {
+            WriteLog( ERR_LVL, "select t_pb_fee_rule err.sqlca.sqlcode[%d]!", sqlca.sqlcode);
+            EXEC SQL close cur_fee_rule1;
+            EXEC SQL free cur_fee_rule1;
+            return -1;
+        }
+
+        trim_space_free_rule(&fee_rule);
+        /*根据手续费计算表达式：计算手续费*/
+        if (find_sub_str (fee_rule.calc_rule_exp, "AMT") )
+        {
+            /* fee_rule.calc_rule_exp */
+            ret = calc_fee_amt_value(face_in.amt, fee_rule.calc_rule_exp, fee);
+            if (ret == 0)
+            {
+                *fee = *fee * rate / 10; /* 计算折扣 */
+                print_fee_rule(fee_rule);
+                print_inter_face(face_in);
+                WriteLog( ERR_LVL, "已找到表达式，且计算出手续费fee[%.2f]!", *fee);
+                break;
+            }
+        }
+    }
+
+    EXEC SQL close cur_fee_rule1;
+    EXEC SQL free cur_fee_rule1;
+
+    return 0;
+}
+
+/*根据表达式计算手续费*/
+int calc_fee_amt_value(double amt, char *cal_rule_exp, double *fee)
+{
+    char *p = cal_rule_exp;
+    char s_val[EXP_STR_LEN];
+    int ret = 0;
+
+    memset(s_val, 0x00, sizeof(s_val) );
+    p = get_str_usesep(p, ':', s_val);
+
+    ret = check_calc_oper(s_val, amt);
+    if (ret == 0) return 1;
+    calc_oper_fee_amt (p, amt, fee);
+
+    return 0;
+}
+
+
+/*检查是否符合条件表达式*/
+int check_calc_oper(char *free_rule_exp, double amt)
+{
+    char *fee_exp = free_rule_exp;
+    char exp_value[EXP_STR_LEN];
+    int ret = 0;
+    int amt_flag = 0;
+    char *p1 = NULL;
+    char tmp[50];
+    double min_amt = 0.00, max_amt = 0.00;
+
+    WriteLog( APP_LVL, "exp[%s]", fee_exp );
+    memset (exp_value, 0x00, sizeof(exp_value) );
+
+    while (*fee_exp != '\0')
+    {
+        if (*fee_exp == ' ') fee_exp++;
+        if (!strncmp(fee_exp, "AMT", 3) )
+        {
+            memset(exp_value, 0x00, sizeof(exp_value));
+            fee_exp = get_mid_str(fee_exp, '(', ')', exp_value);
+            rtrim(exp_value);
+            /** WriteLog( APP_LVL, "AMT: fee_exp [%s]", exp_value ); **/
+            memset(tmp, 0x00, sizeof(tmp) );
+            p1 = get_str_usesep(exp_value, '-', tmp);
+            /** WriteLog( APP_LVL, "tmp: tmp [%s] p1 [%s]", tmp, p1 ); **/
+            min_amt = atof(tmp);
+            max_amt = atof(p1);
+            if (max_amt < 0.00001) max_amt = 999999999999;
+
+            if (amt > min_amt && amt <= max_amt )
+            {
+                amt_flag = 1;
+                WriteLog( ERR_LVL, "已找到表达式区间 exp_value[%s] amt[%.2f]!",
+                          exp_value, amt);
+                break;
+            }
+        }
+
+        *fee_exp++;
+    }
+
+    /*查找到数据，返回真*/
+    return amt_flag;
+}
+
+/*根据表达式计算手续费*/
+int calc_oper_fee_amt(char *str, double amt, double *fee)
+{
+    char *p = NULL;
+    char *result = NULL;
+    char s_amt[AMT_STR_LEN];
+    char cal_exp[EXP_STR_LEN];
+
+    WriteLog( ERR_LVL, "开始计算该表达式 calc_expr[%s]", str);
+    memset(cal_exp, 0x00, sizeof(cal_exp) );
+    p = get_str_usesep(str, '=', cal_exp);
+
+    memset(cal_exp, 0x00, sizeof(cal_exp) );
+    memset(s_amt, 0x00, sizeof(s_amt) );
+    sprintf (s_amt, "%.2f", amt);
+    result = replace(p, "AMT", s_amt);
+    if (result != NULL)
+    {
+        strcpy (cal_exp, result );
+        free (result);
+        result = NULL;
+    }
+    else strcpy (cal_exp, p );
+
+    WriteLog( ERR_LVL, "开始计算该表达式 source[%s] after replace str: cal_exp[%s]", p, cal_exp);
+    calc_str_value(cal_exp, fee);
+    WriteLog( ERR_LVL, "计算出手续费的值 fee=[%.2f]", *fee);
+
+    return 0;
+}
+
+/*查找替换函数*/
+char *replace(char *source, char *sub, char *rep)
+{
+    char *result = NULL;
+    char *pc1=NULL, *pc2=NULL, *pc3=NULL;
+
+    int isource, isub, irep;
+    int count = 0;
+
+    isub = strlen(sub);
+    irep = strlen(rep);
+    isource = strlen(source);
+
+    if (NULL == *sub || NULL == *rep)
+        return (char *)strdup(source);
+    
+    count = get_find_str_count(source, sub);
+    if (count == 0)
+    {
+        return (char *)strdup(source); 
+    }
+
+    count = isource + 1 + (irep-isub)*count;
+    result = (char *)malloc( count );
+    if (result == NULL)
+    {
+         WriteLog( ERR_LVL, "替换时分配内存失败!");
+         return NULL;
+    }
+    WriteLog( APP_LVL, "malloc size [%d] 本次分配内存空间大小", count);
+    memset (result, 0x00, count);
+
+    pc1 = result;
+    while(*source != NULL)
+    {
+        pc2 = source;
+        pc3 = sub;
+        while(*pc2 == *pc3 && *pc3 != NULL && *pc2 != NULL)
+            pc2++, pc3++;
+        if (NULL == *pc3)
+        {
+            pc3 = rep;
+            while (*pc3 != NULL)
+                *pc1++ = *pc3++;
+            pc2--;
+            source = pc2;
+        }
+        else
+            *pc1++ = *source;
+        source++;
+    }
+
+    *pc1 = NULL;
+    return result;
+
+}
+
+/*用管道实现四则运算*/
+int calc_str_value(char *s, double *fee)
+{
+    FILE *pf = NULL;
+    char cmd[EXP_STR_LEN];
+    char res[1024];
+
+    memset(cmd, 0x00, sizeof(cmd) );
+    sprintf (cmd, "echo \"%s\" | bc -l ", s);
+    pf = popen( cmd, "r");
+    fread(res, 1024, 1, pf);
+    rtrim(res);
+    pclose(pf);
+
+    *fee = atof(res);
+    return 0;
+}
+
+/**查找子串，用于检查表达式配置正确性 */
+int find_sub_str(char *source_str, char *sub_str)
+{
+     if (source_str[0] == '\0') return 0;
+
+     return (strstr(source_str, sub_str) == NULL) ? 0 : 1; 
+}
+
+/* 统计一个子串在原串中出现的次数 */
+int get_find_str_count(char* src, char* find){
+    int count = 0;
+    char* position =src;
+    int findLen = strlen(find);
+    while((position = strstr(position, find)) != NULL){
+        count++;
+        position = position + findLen;
+    }
+    return count;
+}
+

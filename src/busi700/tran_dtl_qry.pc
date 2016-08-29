@@ -1,0 +1,264 @@
+/*****************************************************
+**函数描述     : 账户交易明细查询后处理 
+**函数用途     : 给LIST赋值 
+**输入         ：    
+**输出         : 无 
+**创建日期     ：2010/10/28
+**最后修改日期 ：
+**Create by    : zhaofeng
+*****************************************************/
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <time.h>
+#include "pbconstval.h"
+#include "pbstructdef.h"
+#ifdef ORACLE_DATABASE
+EXEC SQL include "pbranchdb.h";
+#else
+#include "pbranchdb.h"
+#endif
+#include "pberrlog.h"
+#include "pbglbvardef.h"
+#include "pbbasefunc.h"
+
+EXEC SQL  include "pb_s_agt_batch.h";
+
+int
+TranDtlQry()
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+	char instno[8+1];
+    /* modify by dly 20120330
+	char cnt[2+1];
+    */
+	char cnt[10+1];
+	char instname[80+1];
+	char date[8+1];
+	char seqno[12+1];
+	char chnlno[3+1];
+	char flag[1+1];
+	char rcvacc[32+1];
+	char rcvcustname[128+1];
+	char num[14+1];
+	EXEC SQL END DECLARE SECTION;
+	long err_no = 0;
+	char curr[6+1];
+	char cashflag[1+1];
+	int i = 0;
+	int j = 0;
+
+    char remark[30+1];
+    char summ[30+1];
+    $char shop_no[20+1];
+    $char shop_name[60+1];
+    char *p = NULL;
+	 
+	memset(cnt,0x00,sizeof(cnt));
+	memset(num,0x00,sizeof(num));
+
+    memset(remark, 0x00,sizeof(remark));
+    memset(summ, 0x00,sizeof(summ));
+    memset(shop_no, 0x00, sizeof(shop_no));
+    memset(shop_name, 0x00, sizeof(shop_name));
+	
+	/** add by wangou 20141029  for  农信银不进行乱码检查**/
+	PutPoolDataByName( "BUSIIB", "thcn2utf8", 0, 0, "0", 0);
+	/** the end **/
+	/*总条数*/
+	GetPoolDataByName( "BUSIIB", "turnPageTotalQnt", 0, 0, cnt, 0);
+	PutPoolDataByName( "BUSIIB", "turnPageTotalQnt", 0, 0, cnt, 0);
+	/*明细查询条数*/
+	GetPoolDataByName( "CBS", "CustNo", 0, 0, num, 0);
+	PutPoolDataByName( "BUSIIB", "v", 0, 0, num, 0);
+	/*add by ch 20110302*/
+	j = atoi(num);	
+	WriteLog(ERR_LVL,"j[%d]", j);
+	for( i = 0;i < j;i++)
+	{
+		memset( instno, 0x00, sizeof( instno ));
+		memset( instname, 0x00, sizeof( instname ));
+		memset( curr, 0x00, sizeof( curr ));
+		memset( seqno, 0x00, sizeof( seqno ));
+		memset( date, 0x00, sizeof( date )); 
+		memset( flag, 0x00, sizeof( flag )); 
+		memset( rcvacc, 0x00, sizeof( rcvacc )); 
+		memset( rcvcustname, 0x00, sizeof( rcvcustname )); 
+		memset( cashflag, 0x00, sizeof( cashflag )); 
+
+        memset( remark, 0x00, sizeof(remark));
+        memset( summ, 0x00, sizeof(summ));
+        memset(shop_no, 0x00, sizeof(shop_no));
+        memset(shop_name, 0x00, sizeof(shop_name));
+
+		GetPoolDataByName( "BUSIIB", "tranBrchID", i, 0, instno, 0);
+		WriteLog(ERR_LVL,"inst_no[%s]i[%d]", instno, i );
+
+        /* modify dly 20120606 begin */
+
+		GetPoolDataByName( "BUSIIB", "remark", i, 0, remark, 0);
+
+        p = strtok(remark, "|");
+		strcpy(summ, p);         /* 前半部分摘要 */
+
+		p = strtok(NULL, "|");
+		strcpy(shop_no, p);      /* 后半部分商户号 */
+		WriteLog(APP_LVL,"remark[%s] summ[%s] shop_no[%s]", remark, summ, shop_no );
+
+        if(p)  /* 有商户号的处理  */
+        {
+            /* 把前部分摘要传下去  */
+            PutPoolDataByName( "BUSIIB", "remark", i, 0, summ, 0);
+
+            /* 由后半部商户号，取商户名 */
+            EXEC SQL SELECT sign_name INTO :shop_name 
+                FROM t_self_sign_mgmt
+                WHERE shop_no = :shop_no
+                ;
+            /* Modified by MSJ for other banks' POS  20120911 - Start */
+            if (SQLCODE!=0 && SQLCODE!=100)
+            {
+                WriteLog(ERR_LVL, "查询t_self_sign_mgmt错误[%d] shop_no[%s]", SQLCODE,shop_no);
+                strcpy(shop_name, "");
+            }
+			else if (SQLCODE==100)
+			{
+                PutPoolDataByName( "BUSIIB", "transBrchNm", i, 0, "他行POS", 0);
+                PutPoolDataByName( "BUSIIB", "transBrchNmSt", i, 0, "他行POS", 0);
+			}
+			/* 20120911 - End */
+
+            PutPoolDataByName( "BUSIIB", "transBrchNm", i, 0, shop_name, 0);
+            PutPoolDataByName( "BUSIIB", "transBrchNmSt", i, 0, shop_name, 0);
+        }
+        else
+        {
+            if (strncmp(instno, "0000", 4) == 0)
+            {
+                PutPoolDataByName( "BUSIIB", "transBrchNm", i, 0, "跨行交易", 0);
+                PutPoolDataByName( "BUSIIB", "transBrchNmSt", i, 0, "跨行交易", 0);
+            }
+            else
+            {
+                if( GetInstName( instno, instname) )
+				{
+					WriteLog(ERR_LVL, "查询机构名失败instno[%s] i[%d]",instno,i);
+					err_no = 99999;
+					PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&err_no,0);
+					PutPoolDataByName("ABSHEAD","_error_code", 0, 0, "查询机构名失败",0);
+					return (-1);
+				}
+				else
+				{
+					PutPoolDataByName( "BUSIIB", "transBrchNm", i, 0, instname, 0);
+					PutPoolDataByName( "BUSIIB", "transBrchNmSt", i, 0, instname, 0);
+				}
+            }
+        }
+
+        /* modify dly 20120606 end */
+
+		GetPoolDataByName( "BUSIIB", "loanCreditFlg", i, 0, flag, 0);
+		if( flag[0] == '1')
+		{
+			PutPoolDataByName( "BUSIIB", "creditAmt", i, 0, "0.000000", 0);
+			PutPoolDataByName( "BUSIIB", "loanCreditFlg", i, 0, "D", 0);
+		}
+		if( flag[0] == '2')
+		{
+			PutPoolDataByName( "BUSIIB", "debitAmt", i, 0, "0.000000", 0);
+			PutPoolDataByName( "BUSIIB", "loanCreditFlg", i, 0, "C", 0);
+		}
+
+		GetPoolDataByName( "BUSIIB", "currencyTyp", i, 0, curr, 0);
+		GetPoolDataByName( "BUSIIB", "cashFlg", i, 0, cashflag, 0);
+		rtrim( curr );
+		rtrim( cashflag );
+		if( ( strlen( curr ) != 0 ) && ( strcmp( curr, "01") == 0) )
+		{
+			PutPoolDataByName( "BUSIIB", "currencyTyp", i, 0, "CNY", 0);
+			PutPoolDataByName( "BUSIIB", "cashFlg", i, 0, "2", 0);
+		}
+		else
+		{
+			PutPoolDataByName( "BUSIIB", "currencyTyp", i, 0, curr, 0);
+			PutPoolDataByName( "BUSIIB", "cashFlg", i, 0, cashflag, 0);
+
+		}
+
+		GetPoolDataByName( "BUSIIB", "transSeqNb", i, 0, seqno, 0);
+		GetPoolDataByName( "BUSIIB", "tranDt", i, 0, date, 0);
+		rtrim(seqno);
+		rtrim(date);
+		
+		EXEC SQL SELECT chnl_no INTO :chnlno
+			FROM t_pb_accjnl_bak 
+			WHERE tran_date = :date 
+			AND lst_seqno = :seqno;
+		if( sqlca.sqlcode != 0)
+		{
+			if(sqlca.sqlcode == 100)
+			{
+				WriteLog(ERR_LVL,"交易渠道无记录！");
+				PutPoolDataByName( "BUSIIB", "transChnl", i, 0, "99", 0);
+				continue;
+			}
+			else
+			{
+				WriteLog(ERR_LVL,"查询记账流水表失败！");
+				err_no = 99999;
+				PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&err_no,0);
+				PutPoolDataByName("ABSHEAD","_error_code", 0, 0, "查询失败：chnlno",0);
+				return( -1 );
+			}
+		}
+		rtrim(chnlno);
+		if( (chnlno[0] == '0') && (chnlno[1] == '0') && (chnlno[2] == '1'))
+		{
+			PutPoolDataByName( "BUSIIB", "transChnl", i, 0, "01", 0);
+		}			
+		else if( (chnlno[0] == '1') && (chnlno[1] == '2') && (chnlno[2] == '0'))
+		{
+			PutPoolDataByName( "BUSIIB", "transChnl", i, 0, "03", 0);
+		}			
+		else if( (chnlno[0] == '1') && (chnlno[1] == '2') && (chnlno[2] == '2'))
+		{
+			PutPoolDataByName( "BUSIIB", "transChnl", i, 0, "06", 0);
+		}			
+		else if( (chnlno[0] == '6') && (chnlno[1] == '6') && (chnlno[2] == '7'))
+		{
+			PutPoolDataByName( "BUSIIB", "transChnl", i, 0, "06", 0);
+		}			
+		else if( (chnlno[0] == '1') && (chnlno[1] == '2') && (chnlno[2] == '3'))
+		{
+			PutPoolDataByName( "BUSIIB", "transChnl", i, 0, "04", 0);
+		}			
+		else if( (chnlno[0] == '6') && (chnlno[1] == '6') && (chnlno[2] == '9'))
+		{
+			PutPoolDataByName( "BUSIIB", "transChnl", i, 0, "04", 0);
+		}			
+		else if( (chnlno[0] == '8') && (chnlno[1] == '2') && (chnlno[2] == '0'))
+		{
+			PutPoolDataByName( "BUSIIB", "transChnl", i, 0, "21", 0);
+		}			
+		else if( (chnlno[0] == '8') && (chnlno[1] == '2') && (chnlno[2] == '1'))
+		{
+			PutPoolDataByName( "BUSIIB", "transChnl", i, 0, "21", 0);
+		}			
+		else if( (chnlno[0] == '8') && (chnlno[1] == '0') && (chnlno[2] == '0'))
+		{
+			PutPoolDataByName( "BUSIIB", "transChnl", i, 0, "22", 0);
+		}			
+		else if( (chnlno[0] == '8') && (chnlno[1] == '0') && (chnlno[2] == '1'))
+		{
+			PutPoolDataByName( "BUSIIB", "transChnl", i, 0, "22", 0);
+		}
+		else 
+		{
+			PutPoolDataByName( "BUSIIB", "transChnl", i, 0, "99", 0);
+			
+		}
+	}
+	return( 0 );
+}

@@ -1,0 +1,727 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+#ifdef ORACLE_DATABASE
+EXEC SQL include "pbranchdb.h";
+#else
+#include "pbranchdb.h"
+#endif
+#include "pbconstval.h"
+#include "pbsysstrlen.h"
+#include "pbstructdef.h"
+#include "pberrlog.h"
+#include "pbglbvardef.h"
+
+EXEC SQL include "pbappdb.h";
+EXEC SQL include "pb_s_agt_batch.h";
+
+#define ERREXP(msg) WriteLog(ERR_LVL,msg ); \
+	PutPoolDataByName("PBSYS","SysErrExp",0,0,msg,0);
+
+char InstNo[4+1];
+long NetBank_PL_InsertPbTlrLog();
+long NETBANK_PL_PutPoolData();
+long UpdNetBank_PL_AccJnl();
+long DelNetBank_PL_AccJnl();
+long NetBank_PL_InsRevJnl();
+
+/***********************************************************************
+* Function      : NetBank_PL_RegAccProc()
+* Input         : 无
+* Output        : 无
+* Return        : 0 - 成功; -1 - 失败
+* Description   : 批量代发记账处理
+* ---------------------------------------------------------------------
+* Author    Action  Date        Content
+* SQF       Create  20101116
+***********************************************************************/
+
+long
+NetBank_PL_RegAccProc()
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+		struct s_pb_tlrlog	pb_tlrlog;
+		char	pbdate[8+1];
+    EXEC SQL END DECLARE SECTION;
+	char    tx_code[40+1];              /*交易码*/
+	char 	curr_type[2+1];
+	char 	summ_no[12+1];
+	char 	summ_note[60+1];
+	char 	inn_acc[32+1];
+	char 	pay_acc[32+1];
+	char 	hostseqno[10+1];
+	char 	err_msg[256+1];
+	char 	s_amt[32+1];
+	long	app_err_no=0;
+	long	errcode = 0;
+    long	ret;
+	long	hoststat=-1;
+	double amt = 0.00;
+	long summno = 0;
+
+    memset(&pb_tlrlog, 0, sizeof(pb_tlrlog));
+    memset(pbdate, 0, sizeof(pbdate));
+	memset( tx_code, 0, sizeof(tx_code));
+	memset( curr_type, 0, sizeof(curr_type));
+	memset( summ_no, 0, sizeof(summ_no));
+	memset( summ_note, 0, sizeof(summ_note));
+	memset( inn_acc, 0, sizeof(inn_acc));
+	memset( pay_acc, 0, sizeof(pay_acc));
+	memset( InstNo, 0, sizeof(InstNo));
+    memset( err_msg, 0, sizeof(err_msg));
+    memset( hostseqno, 0, sizeof(hostseqno));
+    memset( s_amt, 0, sizeof(s_amt));
+
+    WriteLog(TEST_LVL, "===批量帐务处理===");
+	ret = NETBANK_PL_PutPoolData();
+	/**** modified by  wyf 20110323
+	if( ret != 0 )
+	****/
+	if( ret == -1 )
+	{
+        WriteLog( ERR_LVL, "解包失败!\n" );
+        errcode = 99999;
+		/**
+        strcpy( err_msg, "解包失败!" );
+		**/
+        strcpy( err_msg, "系统错误，联系客服处理" );
+        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+		/**
+        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		**/
+		return (-1);
+	}
+	/**** add by wyf 20110323 ****/
+	if( ret == -2 )
+	{
+        WriteLog( ERR_LVL, "协议号或账号错误!\n" );
+        errcode = 99999;
+        strcpy( err_msg, "协议号或账号错误!" );
+        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		return (-1);
+	}
+	/**** add end ****/
+	WriteLog(APP_LVL, "开始登记PB日志表");
+	ret = NetBank_PL_InsertPbTlrLog( &pb_tlrlog );
+	if(ret < 0)
+	{
+		WriteLog(ERR_LVL, "登记PB日志表失败! [%s] [%d]\n ",__FILE__, __LINE__);
+        errcode = 99999;
+        strcpy( err_msg, "系统忙，请稍后再试" );
+        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		return (-1);
+	}
+
+	/*帐务接口变量准备*/
+    GetPoolDataByName( "PBSYS", "RTranCode", 0, 0, tx_code, 0 );
+	strcpy( tx_code, "7021" );
+    rtrim( tx_code );
+	PutPoolDataByName( "ABSHEAD", "_tx_code", 0, 0, tx_code, 0 );
+	/*入帐标识*/
+    PutPoolDataByName( "CBS", "AccSign", 0, 0, "0", 0 );
+    /*交易子码*/
+    PutPoolDataByName( "CBS", "SubTranCode", 0, 0, "01", 0 );
+	/*币种*/
+    GetPoolDataByName( "PAGTBUF", "currtype", 0, 0, curr_type, 0 );
+	rtrim( curr_type );
+    PutPoolDataByName( "CBS", "CurrType", 0, 0, curr_type, 0 );
+    /*摘要码*/
+    GetPoolDataByName( "PAGTBUF", "summ_no", 0, 0, summ_no, 0 );
+	rtrim( summ_no );
+	summno = atol( summ_no );
+    PutPoolDataByName( "CBS", "SummNo", 0, 0, (char *)&summno, 0 );
+    /*摘要*/
+    GetPoolDataByName( "PAGTBUF", "summ_exp", 0, 0, summ_note, 0 );
+	rtrim( summ_note );
+    PutPoolDataByName( "CBS", "Summary", 0, 0, summ_note, 0 );
+	/*转帐：0惟-缴费帐号，1惟入帐帐号*/
+	/*现转标识*/
+	PutPoolDataByName( "CBS", "CshTsfFlag", 0, 0, "1", 0 );
+	PutPoolDataByName( "CBS", "CshTsfFlag", 0, 1, "1", 0 );
+	/*金额*/
+    GetPoolDataByName( "PAGTBUF", "amt", 0, 0, s_amt, 0 );
+	rtrim( s_amt );
+	amt = atof( s_amt );
+	WriteLog( APP_LVL, "amt[%f]s_amt[%s]", amt, s_amt );
+	PutPoolDataByName( "CBS", "Amt", 0, 0, &amt, 0 );
+	PutPoolDataByName( "CBS", "Amt", 0, 1, &amt, 0 );
+	/*帐号*/
+    GetPoolDataByName( "PAGTBUF", "inn_acc", 0, 0, inn_acc, 0 );
+	rtrim( inn_acc );
+    GetPoolDataByName( "PAGTBUF", "accno", 0, 0, pay_acc, 0 );
+	rtrim( pay_acc );
+	PutPoolDataByName( "CBS", "Account", 0, 0, pay_acc, 0 );
+	PutPoolDataByName( "CBS", "Account", 0, 1, inn_acc, 0 );
+
+	GetPoolDataByName( "ABSHEAD", "_seq_no", 0, 0, hostseqno, 0 );
+	PutPoolDataByName("ABSHEAD","list_seqno",0,0, hostseqno,0);
+
+	PutPoolDataByName( "ABSHEAD", "chnl_no", 0, 0, "4", 0);
+	WriteLog(APP_LVL, "调用记帐接口记帐");
+	/*调用记帐接口记帐*/
+	ret = PbRegAcc();
+	if(ret!=0)  
+	{
+		WriteLog(ERR_LVL, " Call PbRegAcc Err! [%s] [%d]\n ", __FILE__, __LINE__); 
+		if(ret == -1)
+		{
+			WriteLog(ERR_LVL, "PbRegAcc超时");
+			errcode = 99999;
+			ret = UpdNetBank_PL_AccJnl( pb_tlrlog.tran_date, pb_tlrlog.tran_seqno );
+			if( ret != 0 )
+			{
+				WriteLog( ERR_LVL, "更新ACCJNL状态失败!" );
+				strcpy( err_msg, "更新ACCJNL状态失败!" );
+				PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+				PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+				return ( -1 );
+			}
+			ret = NetBank_PL_InsRevJnl();
+			if( ret < 0 )
+			{
+				WriteLog( ERR_LVL, "插入冲正流水表失败!" );
+				strcpy( err_msg, "插入冲正流水表失败!" );
+				PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+				PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+				return ( -1 );
+			}
+			strcpy( err_msg, "批量记客户帐超时!" );
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			return(-1);
+		}       
+		else
+		{
+			WriteLog(ERR_LVL, "核心记账错误 hoststat=[%d]",hoststat);
+			errcode = 99999;
+			ret = DelNetBank_PL_AccJnl( pb_tlrlog.tran_date, pb_tlrlog.tran_seqno );
+			if( ret < 0 )
+			{
+				WriteLog( ERR_LVL, "删除ACCJNL表失败!" );
+				strcpy( err_msg, "删除ACCJNL表失败!" );
+				PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+				PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+				return ( -1 );
+			}
+			/**modify by sqf for 将核心报错信息返回给网银 20110713 begin**/
+			GetPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			if( strlen( err_msg ) == 0 )
+				strcpy( err_msg, "批量记客户帐失败!" );
+			/**modify by sqf for 将核心报错信息返回给网银 20110713 end**/
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			return(-1);
+		}
+	}
+	WriteLog(ERR_LVL, "记内部帐成功!\n");
+    
+	return 0;    
+}
+
+long
+NetBank_PL_InsertPbTlrLog( pb_tlrlog )
+EXEC SQL BEGIN DECLARE SECTION;
+	struct s_pb_tlrlog *pb_tlrlog;
+EXEC SQL END DECLARE SECTION;
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+		struct s_pb_tlrlog    ap;
+	EXEC SQL END DECLARE SECTION;
+    char	out_tran_no[41];
+	memset( out_tran_no, 0x00, sizeof( out_tran_no ) );
+	memset( &ap, 0x00, sizeof( ap ) );
+
+	PayGetCoreDate( pb_tlrlog->tran_date );
+
+	/**
+	if( get_TTseqno( pb_tlrlog->tran_seqno ) != 0 )
+	{
+		WriteLog( ERR_LVL, "取PB流水号出错!" );
+		return ( -1 );	
+	}
+	**/
+	GetPoolDataByName( "ABSHEAD", "_seq_no", 0, 0, pb_tlrlog->tran_seqno, 0 );
+	WriteLog( ERR_LVL,"pbtlrlog.tran_seqno[%s]", pb_tlrlog->tran_seqno );
+	GetPoolDataByName( "PBSYS", "BusiType", 0, 0, pb_tlrlog->busi_type, 0 );
+	/*GetPoolDataByName( "ABSHEAD", "organ_no", 0, 0, pb_tlrlog->tran_inst, 0 );
+	*/
+	strcpy( pb_tlrlog->tran_inst, InstNo );
+	WriteLog( APP_LVL, "tran_inst[%s]\n", pb_tlrlog->tran_inst );
+	GetPoolDataByName( "PBSYS", "RChnlNo", 0, 0, pb_tlrlog->chnl_no, 0 );
+	GetPoolDataByName( "PBSYS", "TranCode", 0, 0, pb_tlrlog->tran_no, 0 );
+	
+	GetPoolDataByName( "ABSHEAD", "_tlr_no", 0, 0, pb_tlrlog->tran_tlr, 0 );
+
+	GetPoolDataByName( "PBSYS", "RTranCode", 0, 0, out_tran_no, 0 );
+	strncpy( pb_tlrlog->out_tran_no, out_tran_no, 10 );
+    pb_tlrlog->out_tran_no[10] = '\0';
+
+    strcpy(pb_tlrlog->tran_type,"1");
+    strcpy(pb_tlrlog->tran_stat,"2");
+	WriteLog( ERR_LVL,"time_stmp[%s]", pb_tlrlog->time_stmp );
+    GetCurTimeStr(pb_tlrlog->time_stmp);
+	WriteLog( ERR_LVL,"time_stmp[%s]", pb_tlrlog->time_stmp );
+
+   	memcpy( &ap, pb_tlrlog, sizeof( struct s_pb_tlrlog ) ); 
+	PrintPBTlrLog( &ap );
+    EXEC SQL INSERT INTO t_pb_tlrlog VALUES ( :ap );
+    if( sqlca.sqlcode )
+    {
+        WriteLog( ERR_LVL,"Insert t_pb_tlrlog error [%d]", sqlca.sqlcode );
+        PrintPBTlrLog( &ap );
+		return( -1 );
+    }
+
+	return( 0 );
+}
+
+long NETBANK_PL_PutPoolData()
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+	char backup2[128+1];
+	struct s_sc_agt_bat_item_mgmt AgtMgmt;
+	struct s_sc_agt_para_mgmt ParaMgmt;
+	/*char InstNo[4+1];*/
+	EXEC SQL END DECLARE SECTION;
+	char cmd[400+1];
+	char btchNb[32+1];
+	char btchNm[128+1];
+	char operTyp[2+1];
+	char currencyTyp[6+1];
+	char cashFlg[2+1];
+	char remarkCd[16+1];
+	char remark[128+1];
+	char backup1[128+1];
+	char backup3[128+1];
+	char seqNb[32+1];
+	char payAcct[32+1];
+	char payCustNm[128+1];
+	char rcvAcct[32+1];
+	char rcvCustNm[128+1];
+	char memo[128+1];
+	char hostseqno[10+1];
+	char err_msg[256+1];
+	char s_amt[32+1];
+	char buff[2048+1];
+	char tmp_str[50][128+1];
+	long totalQnt = 0;
+	long errcode = 0;
+	int ret = 0;
+	int i = 0;
+	long j = 0;
+	double totalAmt = 0.00;
+	double amt = 0.00;
+	FILE *fp;
+	char txtfile[256+1];
+	char cfgfile[128+1];
+	char xmlinput[256+1];
+	char xmlinputfilename[128+1];
+	char filepath[128+1];
+	char *p = NULL;
+	char *q = NULL;
+
+	memset( &ParaMgmt, 0, sizeof( ParaMgmt ) );
+	memset( btchNb, 0, sizeof( btchNb ) );
+	memset( btchNm, 0, sizeof( btchNm ) );
+	memset( operTyp, 0, sizeof( operTyp ) );
+	memset( currencyTyp, 0, sizeof( currencyTyp ) );
+	memset( cashFlg, 0, sizeof( cashFlg ) );
+	memset( remarkCd, 0, sizeof( remarkCd ) );
+	memset( remark, 0, sizeof( remark ) );
+	memset( backup1, 0, sizeof( backup1 ) );
+	memset( backup2, 0, sizeof( backup2 ) );
+	memset( backup3, 0, sizeof( backup3 ) );
+	memset( seqNb, 0, sizeof( seqNb ) );
+	memset( payAcct, 0, sizeof( payAcct ) );
+	memset( payCustNm, 0, sizeof( payCustNm ) );
+	memset( rcvAcct, 0, sizeof( rcvAcct ) );
+	memset( rcvCustNm, 0, sizeof( rcvCustNm ) );
+	memset( memo, 0, sizeof( memo ) );
+	memset( hostseqno, 0, sizeof( hostseqno ) );
+	memset( err_msg, 0, sizeof( err_msg ) );
+	memset( txtfile, 0, sizeof( txtfile ) );
+	memset( cfgfile, 0, sizeof( cfgfile ) );
+	memset( xmlinput, 0, sizeof( xmlinput ) );
+	memset( xmlinputfilename, 0, sizeof( xmlinputfilename ) );
+	memset( filepath, 0, sizeof( filepath ) );
+	memset( buff, 0, sizeof( buff ) );
+	memset( s_amt, 0, sizeof( s_amt ) );
+
+	GetPoolDataByName( "ABSHEAD", "_seq_no", 0, 0, hostseqno, 0);
+	WriteLog( APP_LVL, "hostseqno[%s]\n", hostseqno );
+	/***取包内容***/
+	GetPoolDataByName( "BUSIIB", "transfilename", 0, 0, xmlinputfilename, 0 );
+	WriteLog( APP_LVL, "xmlinputfilename[%s]\n", xmlinputfilename );
+	sprintf( filepath, "%s/print", getenv( "HOME" ) );
+	if( access( filepath, R_OK ) != 0 )
+	{
+		if( mkdir( filepath, S_IEXEC | S_IREAD | S_IWRITE | S_IRGRP | S_IXGRP | S_IXOTH | S_IROTH ) )
+		{
+			WriteLog( ERR_LVL, "创建目录出错[%s]ret[%d]err[%s]!", filepath, ret, strerror( errno ) );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, "创建目录出错1!", 0 );
+			return ( -1 );
+		}
+	}
+	memset( filepath, 0x00, sizeof( filepath ) );
+	sprintf( filepath, "%s/print/NETBANK", getenv( "HOME" ) );
+	if( access( filepath, R_OK ) != 0 )
+	{
+		if( mkdir( filepath, S_IEXEC | S_IREAD | S_IWRITE | S_IRGRP | S_IXGRP | S_IXOTH | S_IROTH ) )
+		{
+			WriteLog( ERR_LVL, "创建目录出错[%s]ret[%d]err[%s]!", filepath, ret, strerror( errno ) );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, "创建目录出错2!", 0 );
+			return ( -1 );
+		}
+	}
+	memset( filepath, 0x00, sizeof( filepath ) );
+	sprintf( filepath, "%s/print/NETBANK/TOPB", getenv( "HOME" ) );
+	if( access( filepath, R_OK ) != 0 )
+	{
+		if( mkdir( filepath, S_IEXEC | S_IREAD | S_IWRITE | S_IRGRP | S_IXGRP | S_IXOTH | S_IROTH ) )
+		{
+			WriteLog( ERR_LVL, "创建目录出错[%s]ret[%d]err[%s]!", filepath, ret, strerror( errno ) );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, "创建目录出错3!", 0 );
+			return ( -1 );
+		}
+	}
+	ret = FtpFileName( "7000000001", 2, xmlinputfilename, xmlinputfilename, xmlinputfilename );
+	if( ret )
+	{
+		WriteLog( ERR_LVL, "取xml文件失败[%s]!", xmlinputfilename );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, "取xml文件失败!", 0 );
+		return ( -1 );
+	}
+	memset( cfgfile, 0x00, sizeof( cfgfile ) );
+	sprintf( cfgfile, "%s/etc/%s", getenv( "HOME" ), "xml700.cfg" );
+	WriteLog( APP_LVL, "cfgfile[%s]\n", cfgfile );
+
+	memset( xmlinput, 0x00, sizeof( xmlinput ) );
+	sprintf( xmlinput, "%s/print/NETBANK/TOPB/%s", getenv( "HOME" ), xmlinputfilename );
+	WriteLog( APP_LVL, "xmlinput[%s]\n", xmlinput );
+
+	memset( txtfile, 0x00, sizeof( txtfile ) );
+	sprintf( txtfile, "%s/print/NETBANK/TOPB/PB%s%s.txt", getenv( "HOME" ), "CBS0000211", hostseqno );
+	WriteLog( APP_LVL, "txtfile[%s]\n", txtfile );
+
+	memset( cmd, 0x00, sizeof(cmd) );
+	sprintf( cmd, "XmlExchTxt 1 %s CBS0000210 %s %s UTF-8 1>null 2>&1", cfgfile,xmlinput, txtfile );
+	/**
+	sprintf( cmd, "XmlExchTxt 1 %s CBS0000210 %s %s UTF-8 1>/home/pbtest/log/700/111.log 2>&1", cfgfile,xmlinput, txtfile );
+	**/
+	WriteLog( APP_LVL, "cmd[%s]\n", cmd );
+	ret = system( cmd );
+	if( ret )
+	{
+		WriteLog( ERR_LVL, "xml文件转换出错!" );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, "xml文件转换出错!", 0 );
+		return ( -1 );
+	}
+	WriteLog( APP_LVL, "txtfile[%s]\n", txtfile );
+	fp = fopen( txtfile, "r" );
+	if( fp == NULL )
+	{
+		WriteLog( ERR_LVL, "打开txtfile[%s]文件失败!", txtfile );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, "打开txt文件失败!", 0 );
+		return ( -1 );
+	}
+	/***从文件中读取第6行数据***/
+	for( i = 0; i < 5; i++ )
+	{
+		memset( buff, 0x00, sizeof( buff ) );
+		fgets( buff, sizeof( buff ), fp );
+		WriteLog( APP_LVL, "buff[%s]\n", buff );
+	}
+
+	memset( buff, 0x00, sizeof( buff ) );
+	p = fgets( buff, sizeof( buff ), fp );
+	if( p == NULL )
+	{
+		WriteLog( ERR_LVL, "读取txtfile[%s]文件出错!", txtfile );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, "读取txt文件失败!", 0 );
+		fclose( fp );
+		return ( -1 );
+	}
+	WriteLog( APP_LVL, "buff[%s]\n", buff );
+
+	j = 0;
+	while( 1 )
+	{
+		if( j > 50 )
+		{
+			WriteLog( ERR_LVL, "解包错，防止死循环!\n" );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, "解包错!", 0 );
+			fclose( fp );
+			return (-1);
+		}
+		p = strchr( buff, '|' );
+		if( p == NULL )
+		{
+			break;
+		}
+		else
+		{
+			memset( tmp_str[j], 0x00, sizeof( tmp_str[j] ) );
+			q = buff;
+			strncpy( tmp_str[j], buff, p - q );
+			WriteLog( APP_LVL, "tmp_str[%s]j[%ld]", tmp_str[j], j );
+			strcpy( buff, p + 1 );
+			j ++;
+			continue;
+		}
+	}
+
+	strcpy( btchNb, tmp_str[0] );
+	rtrim( btchNb );
+	WriteLog( APP_LVL, "btchNb[%s]\n", btchNb );
+	strcpy( btchNm, tmp_str[1] );
+	rtrim( btchNm );
+	WriteLog( APP_LVL, "btchNm[%s]\n", btchNm );
+	strcpy( operTyp, tmp_str[2] );
+	rtrim( operTyp );
+	WriteLog( APP_LVL, "operTyp[%s]\n", operTyp );
+
+	totalQnt = atol( tmp_str[3]);
+	WriteLog( APP_LVL, "totalQnt[%d]\n", totalQnt );
+	totalAmt = atof( tmp_str[4] );
+	WriteLog( APP_LVL, "totalAmt[%f]\n", totalAmt );
+	sprintf( s_amt, "%.2f", totalAmt );
+	rtrim( s_amt );
+	WriteLog( APP_LVL, "s_amt[%s]\n", s_amt );
+
+	PutPoolDataByName( "PAGTBUF", "amt", 0, 0, s_amt, 0 );
+
+	strcpy( currencyTyp, tmp_str[5] );
+	rtrim( currencyTyp );
+	WriteLog( APP_LVL, "currencyTyp[%s]\n", currencyTyp );
+	
+	if( strcmp( currencyTyp, "CNY" ) == 0 )
+	{
+		memset( currencyTyp, 0x00, sizeof( currencyTyp ) );
+		strcpy( currencyTyp, "01" );
+	}
+	else if( strcmp( currencyTyp, "HKD" ) )
+	{
+		memset( currencyTyp, 0x00, sizeof( currencyTyp ) );
+		strcpy( currencyTyp, "02" );
+	}
+	else if( strcmp( currencyTyp, "USD" ) )
+	{
+		memset( currencyTyp, 0x00, sizeof( currencyTyp ) );
+		strcpy( currencyTyp, "03" );
+	}
+	else
+	{
+		WriteLog( ERR_LVL, "币种未知!\n" );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, "币种未知!", 0 );
+		fclose( fp );
+		return (-1);
+	}
+	PutPoolDataByName( "PAGTBUF", "currtype", 0, 0, currencyTyp, 0 );
+	strcpy( cashFlg, tmp_str[6] );
+	rtrim( cashFlg );
+	WriteLog( APP_LVL, "cashFlg[%s]\n", cashFlg );
+	strcpy( payAcct, tmp_str[7] );
+	rtrim( payAcct );
+	WriteLog( APP_LVL, "payAcct[%s]\n", payAcct );
+	PutPoolDataByName( "PAGTBUF", "accno", 0, 0, payAcct, 0 );
+	strcpy( payCustNm, tmp_str[8] );
+	rtrim( payCustNm );
+	WriteLog( APP_LVL, "payCustNm[%s]\n", payCustNm );
+	strcpy( remarkCd, tmp_str[9] );
+	rtrim( remarkCd );
+	WriteLog( APP_LVL, "remarkCd[%s]\n", remarkCd );
+	/***
+	直接用表里配置的摘要码
+	PutPoolDataByName( "PAGTBUF", "summ_no", 0, 0, remarkCd, 0 );
+	***/
+	strcpy( remark, tmp_str[10] );
+	rtrim( remark );
+	WriteLog( APP_LVL, "remark[%s]\n", remark );
+	/***
+	PutPoolDataByName( "PAGTBUF", "summ_exp", 0, 0, remark, 0 );
+	***/
+	strcpy( backup1, tmp_str[11] );
+	rtrim( backup1 );
+	WriteLog( APP_LVL, "backup1[%s]\n", backup1 );
+	strcpy( backup2, tmp_str[12] );
+	rtrim( backup2 );
+	WriteLog( APP_LVL, "backup2[%s]\n", backup2 );
+	strcpy( backup3, tmp_str[13] );
+	rtrim( backup3 );
+	WriteLog( APP_LVL, "backup3[%s]\n", backup3 );
+
+	fclose( fp );
+
+	EXEC SQL SELECT * INTO :AgtMgmt
+		FROM t_sc_agt_bat_item_mgmt
+		WHERE batch_no = :backup2;
+	/*	AND inst_no = :InstNo;*/
+	if( sqlca.sqlcode )
+	{
+		WriteLog( ERR_LVL, "查询批量项目配置表失败!batch_no[%s]inst_no[%s]\n", backup2, InstNo );
+		/**** modified by wyf 20110323
+		return (-1);
+		****/
+		return (-2);
+	}
+	strcpy( InstNo, AgtMgmt.inst_no );
+	rtrim( InstNo );
+	WriteLog( APP_LVL, "InstNo[%s]\n", InstNo );
+	PutPoolDataByName( "ABSHEAD", "organ_no", 0, 0, InstNo, 0 );
+	WriteLog( APP_LVL, "inn_acc[%s]\n", AgtMgmt.head_glac );
+	rtrim( AgtMgmt.head_glac );
+	PutPoolDataByName( "PAGTBUF", "inn_acc", 0, 0, AgtMgmt.head_glac, 0 );
+	rtrim( AgtMgmt.summ_no );
+	PutPoolDataByName( "PAGTBUF", "summ_no", 0, 0, AgtMgmt.summ_no, 0 );
+	rtrim( AgtMgmt.summ_note );
+	PutPoolDataByName( "PAGTBUF", "summ_exp", 0, 0, AgtMgmt.summ_note, 0 );
+
+	EXEC SQL SELECT * INTO :ParaMgmt
+		FROM t_sc_agt_para_mgmt
+		WHERE batch_no = :backup2;
+	/*	AND inst_no = :InstNo;*/
+	if( sqlca.sqlcode )
+	{
+		WriteLog( ERR_LVL, "查询批量项目配置表失败!batch_no[%s]inst_no[%s]\n", backup2, InstNo );
+		/**** modified by wyf 20110323
+		return (-1);
+		****/
+		return (-2);
+	}
+	/***检查转出账号是否同批量项目配置表中的一样***/
+    rtrim( payAcct );
+    rtrim( ParaMgmt.com_acc );
+    if( strcmp( payAcct, ParaMgmt.com_acc ) != 0 )
+    {
+        WriteLog( ERR_LVL, "转出账号与配置不一致payAcct[%s]com_acc[%s]!\n", payAcct, ParaMgmt.com_acc );
+		/**** modified by wyf 20110323
+        return (-1);
+		****/
+        return (-2);
+    }
+
+	return ( 0 );
+}
+
+long 
+UpdNetBank_PL_AccJnl( date, seqno )
+EXEC SQL BEGIN DECLARE SECTION;
+char *date;
+char *seqno;
+EXEC SQL END DECLARE SECTION;
+{
+	/***更新财务流水位抹帐状态***/
+	EXEC SQL UPDATE t_pb_accjnl
+		SET tran_stat = '1'
+		WHERE tran_date = :date
+		AND tot_seqno = :seqno;
+	if( sqlca.sqlcode || sqlca.sqlerrd[2] != 1 )
+	{
+		WriteLog( ERR_LVL, "更新失败date[%s]seqno[%s],sqlcode[%d]sqlerrd[%d]", date, seqno, sqlca.sqlcode , sqlca.sqlerrd[2] );
+		return ( -1 );
+	}
+
+	return ( 0 );
+}
+
+long 
+DelNetBank_PL_AccJnl( date, seqno )
+EXEC SQL BEGIN DECLARE SECTION;
+char *date;
+char *seqno;
+EXEC SQL END DECLARE SECTION;
+{
+	/***删除AccJnl记录***/
+	EXEC SQL DELETE FROM t_pb_accjnl
+	WHERE tran_date = :date
+	AND tot_seqno = :seqno;
+	if( sqlca.sqlcode )
+	{
+		WriteLog( ERR_LVL, "删除失败date[%s]seqno[%s]sqlcode[%d]", date, seqno, sqlca.sqlcode );
+		return ( -1 );
+	}
+
+	return ( 0 );
+}
+
+long NetBank_PL_InsRevJnl()
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+	struct s_pb_reverse pb_reverse;
+	char status[1+1];
+	EXEC SQL END DECLARE SECTION;
+
+	dtime_t dt_time;
+	char tmp_time[80+1];
+	memset( &pb_reverse, 0x00, sizeof( pb_reverse ) );
+	memset( &dt_time, 0x00, sizeof( dt_time ) );
+	memset( status, 0x00, sizeof( status ) );
+	memset( tmp_time, 0x00, sizeof( tmp_time ) );
+
+	PayGetCoreDate( pb_reverse.TranDate );
+	GetPoolDataByName( "PBSYS", "BusiType", 0, 0, pb_reverse.BusiType, 0 );
+	GetPoolDataByName( "PBSYS", "TranCode", 0, 0, pb_reverse.TranCode, 0 );
+	pb_reverse.PrioLvl = 5;
+	pb_reverse.Status[0] = '0';
+	pb_reverse.RevTimes = 10;
+
+	dtcurrent( &dt_time );
+	dttoasc( &dt_time, tmp_time );
+	rtrim( tmp_time );
+	WriteLog( APP_LVL, "系统时间tmp_time[%s]\n", tmp_time );
+	memcpy( pb_reverse.RevTime, tmp_time + 11, 2 );
+	memcpy( pb_reverse.RevTime + 2, tmp_time + 14, 2 );
+	memcpy( pb_reverse.RevTime + 4, tmp_time + 17, 2 );
+	
+	pb_reverse.RevSeq = 0;
+	strcpy( pb_reverse.SrcJourNo, "000000" );
+	strcpy( pb_reverse.ChnlNo, "901" );
+	GetPoolDataByName( "ABSHEAD", "_seq_no", 0, 0, pb_reverse.JourNo, 0 );
+	
+	EXEC SQL INSERT INTO t_pb_reverse VALUES( :pb_reverse );
+	if( sqlca.sqlcode && sqlca.sqlcode != -239 && sqlca.sqlcode != -268 )
+	{
+		WriteLog( ERR_LVL, "插入冲正表失败[%d]", sqlca.sqlcode );
+		PrintPbReverse( &pb_reverse );
+		return ( -1 );
+	}
+	if( sqlca.sqlcode == -239 || sqlca.sqlcode == -268 )
+	{
+		EXEC SQL SELECT status INTO :status
+		FROM t_pb_reverse
+		WHERE JourNo = :pb_reverse.JourNo
+		AND TranDate = :pb_reverse.TranDate;
+		if( sqlca.sqlcode )
+		{
+			WriteLog( ERR_LVL, "检索日志表错[%d]", sqlca.sqlcode );
+			return ( -1 );
+		}
+		if( status[0] == '1' )
+		{
+			EXEC SQL UPDATE t_pb_reverse 
+			set Status = '0',
+				RevTimes = :pb_reverse.RevTimes
+			WHERE JourNo = :pb_reverse.JourNo
+			AND TranDate = :pb_reverse.TranDate;
+			if( sqlca.sqlcode )
+			{
+				WriteLog( ERR_LVL, "更新冲正表失败[%d]", sqlca.sqlcode );
+				return ( -1 );
+			}
+		}
+		else
+		{
+			WriteLog( ERR_LVL, "该笔交易未冲正成功sqlcode[%d],journo[%s]trandate[%s]", sqlca.sqlcode, pb_reverse.JourNo, pb_reverse.TranDate );
+			return ( -1 );
+		}
+	}
+
+	return ( 0 );
+}

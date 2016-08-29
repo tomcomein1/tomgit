@@ -1,0 +1,283 @@
+/*****************************************************
+**函数描述     : 零存整取账号明细查询
+**函数用途     :  
+**输入         ：    
+**输出         : 无 
+**创建日期     ：2013/05/02
+**最后修改日期 ：
+**Create by    : wenfeng
+*****************************************************/
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <time.h>
+#include "pbconstval.h"
+#include "pbstructdef.h"
+#ifdef ORACLE_DATABASE
+EXEC SQL include "pbranchdb.h";
+#else
+#include "pbranchdb.h"
+#endif
+#include "pberrlog.h"
+#include "pbglbvardef.h"
+#include "pbbasefunc.h"
+$include "pbsrv.h"
+#include "pqds.h"
+
+EXEC SQL  include "pb_s_agt_batch.h";
+
+long AccQryPub5005();   /* Added by MSJ for SC6000Z项目 -20140519 */
+
+int
+QryPieDeal()
+{
+	struct s_fix_led_info  fix_led_info;	/*定期信息*/
+	struct s_fix_dtl_info fix_info;
+	
+	char num[14+1];
+	char tran_seqno[10+1];
+	char accTyp[1+1];               /*帐号类型*/
+	char Acc[20+1];                 /*帐号*/
+	char fixAcct[32+1];             /*定期帐号*/
+	char str_trandate[10+1];
+	char err_msg[256+1];
+	struct head head;
+	long fix_dtl_num = 0;
+	long sendlen = 0;
+	long reclen = 0;
+
+	long hoststat = 0;
+	long errcode = 0;
+	long bgn_no = 0;
+	long get_num = 0;
+	char curr[6+1];
+	char cashflag[1+1];
+	double amount;
+	int i = 0;
+	int j = 0;
+	int ret = 0;
+	long saveTerm = 0;			/*总期数*/
+	long curSaveTerm = 0;               /*已存期数*/
+	long term_tmp = 0;                  /*当前应存期数*/
+	char tmpstr[256+1];
+
+    	char bgn_date[8+1];
+    	char end_date[8+1];
+	 
+	memset(num, 0x00, sizeof(num));
+	memset(err_msg, 0x00, sizeof(err_msg));
+	memset(accTyp, 0x00, sizeof(accTyp));
+	memset(Acc, 0x00, sizeof(Acc));
+	memset(fixAcct, 0x00, sizeof(fixAcct));
+	memset(str_trandate, 0x00, sizeof(str_trandate));
+	memset(bgn_date, 0x00, sizeof(bgn_date));
+	memset(end_date, 0x00, sizeof(end_date));
+	memset(tran_seqno, 0x00, sizeof(tran_seqno));
+	memset(&fix_led_info, 0x00, sizeof(struct s_fix_led_info));
+
+
+	/* 从变量池取值 */
+	GetPoolDataByName("BUSIIB", "acctTyp", 0, 0, accTyp, 0);
+	GetPoolDataByName("BUSIIB", "acct", 0, 0, Acc, 0);
+	GetPoolDataByName("BUSIIB", "billNb", 0, 0, fixAcct, 0);
+	GetPoolDataByName("BUSIIB", "bgnDt", 0, 0, bgn_date, 0);
+	GetPoolDataByName("BUSIIB", "endDt", 0, 0, end_date, 0);
+	memset(num, 0x00, sizeof(num));
+	GetPoolDataByName("BUSIIB", "turnPageBgnPos", 0, 0, num, 0);
+	bgn_no = atoi(num);
+	memset(num, 0x00, sizeof(num));
+	GetPoolDataByName("BUSIIB", "turnPageShowQnt", 0, 0, num, 0);
+	get_num = atoi(num);
+
+
+	WriteLog(APP_LVL, "accTyp %s!", accTyp);
+	WriteLog(APP_LVL, "Acc %s!", Acc);
+	WriteLog(APP_LVL, "bgn_date %s!", bgn_date);
+	WriteLog(APP_LVL, "end_date %s!", end_date);
+	WriteLog(APP_LVL, "fixAcct %s!", fixAcct);
+	WriteLog(APP_LVL, "bgn_no %ld!", bgn_no);
+	WriteLog(APP_LVL, "get_num %ld!", get_num);
+	/* 判断 */
+	if(accTyp[0] == '0')			/*教育储蓄*/
+	{
+		WriteLog(APP_LVL, "教育储蓄账号");
+	}
+	else if(accTyp[0] == '1')		/*零存整取账号*/
+	{
+		WriteLog(APP_LVL, "零存整取账号");
+	}
+	else
+	{
+		WriteLog( ERR_LVL, "帐户类型非法!!!");
+		errcode = 99999;
+		strcpy( err_msg, "帐户类型非法!!!");
+		PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode, 0);
+	  	PutPoolDataByName("ABSHEAD","_error_code", 0, 0, err_msg, 0);
+		return -1;
+	}
+
+	GetPoolDataByName( "ABSHEAD", "_seq_no", 0, 0, tran_seqno, 0);
+	WriteLog(APP_LVL, "tran_seqno[%s]", tran_seqno);	
+	
+	/**Modified by MSJ for SC6000Z项目 20140517 - Start **/
+	trim( Acc );
+	trim( fixAcct );
+	WriteLog( APP_LVL, "Acc[%s], fixAcct[%s]", Acc, fixAcct );
+	ret = AccQryPub5001( Acc, fixAcct, "0" );
+	if( ret )
+	{
+		WriteLog( ERR_LVL, "调用5001查询账号[%s]信息失败", Acc );
+		errcode = 99999;
+		strcpy( err_msg, "调用5001查询账号失败!" );
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		return ( -1 );
+	}
+
+  GetPoolDataByName("BUSIIB", "voucherNo", 0, 0, fix_led_info.fix_ledger.crdr_recd, 0);
+  
+	/* 约定存款期数 */
+	trim(fix_led_info.fix_ledger.crdr_recd);
+	saveTerm = strlen(fix_led_info.fix_ledger.crdr_recd)-1; /*总期数*/
+	
+	ret = AccQryPub5005( Acc, fixAcct, "0", bgn_date, end_date, bgn_no, get_num );
+	if( ret )
+	{
+		WriteLog( ERR_LVL, "调用5005查询账号[%s]信息失败", Acc );
+		errcode = 99999;
+		strcpy( err_msg, "查询账号明细失败!" );
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		return ( -1 );
+	}
+	
+		GetPoolDataByName("BUSIIB", "turnPageTotalQnt", 0, 0, num, 0);
+	
+	memset(num,0x00,sizeof(num));
+	GetPoolDataByName("BUSIIB", "turnPageTotalQnt", 0, 0, num, 0);
+	fix_dtl_num=atoi(num);
+	WriteLog(ERR_LVL, "取得记录[%ld]条", fix_dtl_num);
+	PutPoolDataByName("BUSIIB", "v", 0, 0, num, 0);
+	for(i=0; i<fix_dtl_num; i++ )
+	{
+		memset(&fix_info, 0x00, sizeof(struct s_fix_dtl_info) );
+    
+			/* Addyed by MSJ for SC6000z项目 - 20140522 */
+			GetPoolDataByName("BUSIIB", "tranDt", i, 0, fix_info.fix_dtl.tran_date, 0);
+			GetPoolDataByName("BUSIIB", "loanCreditFlg", i, 0, fix_info.fix_dtl.dr_cr_flag, 0);
+			GetPoolDataByName("BUSIIB", "bal", i, 0, fix_info.fix_dtl.bal, 0);
+			
+		/*交易日期*/
+		rfmtdate(fix_info.fix_dtl.tran_date, "yyyymmdd", str_trandate);
+
+        	PutPoolDataByName("BUSIIB", "tranDt", i, 0, str_trandate, 0);
+        	/*交易类型*/
+		if(fix_info.fix_dtl.dr_cr_flag[0] == '1')	/*销户*/
+		{
+			PutPoolDataByName("BUSIIB", "operTyp", i, 0, "3", 0);
+        	}
+		else if(strcmp(fix_info.fix_dtl.amt, fix_info.fix_dtl.bal) == 0)  
+		{
+			PutPoolDataByName("BUSIIB", "operTyp", i, 0, "1", 0);
+		}
+		else
+		{
+			PutPoolDataByName("BUSIIB", "operTyp", i, 0, "2", 0);
+		}
+		/*现转标志*/ 
+		GetPoolDataByName("BUSIIB", "cashFlg", i, 0, fix_info.fix_dtl.csh_tsf_flag, 0);
+		/*交易额*/
+		if( fix_info.fix_dtl.dr_cr_flag[0] == '1' )
+		{
+			GetPoolDataByName("BUSIIB", "debitAmt", i, 0, fix_info.fix_dtl.amt, 0);
+			WriteLog( APP_LVL, "交易金额[%s]", fix_info.fix_dtl.amt );
+		}
+		else if( fix_info.fix_dtl.dr_cr_flag[0] == '2' )
+		{
+			GetPoolDataByName("BUSIIB", "creditAmt", i, 0, fix_info.fix_dtl.amt, 0);
+			WriteLog( APP_LVL, "交易金额[%s]", fix_info.fix_dtl.amt );
+			
+		}
+		PutPoolDataByName("BUSIIB", "tranamt", i, 0, fix_info.fix_dtl.amt, 0);
+				
+		/*当期期数*/
+		term_tmp = atof(fix_info.fix_dtl.bal) / atof(fix_info.fix_dtl.amt); 
+        	sprintf(num, "%ld", term_tmp);
+		PutPoolDataByName("BUSIIB", "backup1", i, 0, num, 0);
+		/*是否补存*/
+        	if(fix_led_info.fix_ledger.crdr_recd[term_tmp-1] == '0')
+		{
+			PutPoolDataByName("BUSIIB", "overDueFlg", i, 0, "Y", 0);
+        	}
+		else
+		{
+			PutPoolDataByName("BUSIIB", "overDueFlg", i, 0, "N", 0);
+        	}
+		/*约定期数*/
+		memset(tmpstr, 0x00, sizeof(tmpstr));
+		sprintf(tmpstr, "%d", saveTerm );
+		PutPoolDataByName("BUSIIB", "backup2", i, 0, tmpstr, 0);
+        	/*余额*/
+		PutPoolDataByName("BUSIIB", "bal", i, 0, fix_info.fix_dtl.bal, 0);
+	}
+
+	return( 0 );
+}
+
+
+/** Added by MSJ for SC6000Z项目 - 20140519 **/
+long 
+AccQryPub5005( acc, subacc, seqno, bgn_date, end_date, bgn_no, get_num )
+char *acc;  char *subacc; char *seqno;
+char *bgn_date; char *end_date; int bgn_no; int get_num;
+{
+
+	char tran_seqno[10+1];
+	long hoststat = 0;
+	long tran_flag = 0;
+	char SvrName[16+1];
+	
+	memset( tran_seqno, 0x00, sizeof( tran_seqno ) );
+	memset( SvrName, 0x00, sizeof( SvrName ) );
+	
+	WriteLog(ERR_LVL, "AccQryPub5005:acc[%s] subacc[%s] seqno[%s]", acc, subacc, seqno );
+	WriteLog(ERR_LVL,"AccQryPub5005:bgn_date[%s] end_date[%s] bgn_no[%d] get_num[%d]",bgn_date,end_date,bgn_no,get_num );
+	
+	GetPoolDataByName( "ABSHEAD", "_seq_no", 0, 0, tran_seqno, 0);
+	WriteLog( ERR_LVL, "tran_seqno[%s]", tran_seqno );
+	
+	/* 上传核心报文头数据 */
+	PutPoolDataByName( "ABSHEAD", "_tx_code", 0, 0, "5005", 0);
+  PutPoolDataByName( "ABSHEAD", "_tx_op_stat", 0, 0, "N" , 0 );
+  PutPoolDataByName( "ABSHEAD", "chnl_no", 0, 0, "W", 0 );
+  PutPoolDataByName( "ABSHEAD", "tran_flag", 0, 0, &tran_flag, 0 );
+  PutPoolDataByName( "ABSHEAD", "organ_no", 0, 0, "9996", 0);
+  PutPoolDataByName( "ABSHEAD", "query_inst", 0, 0, "9996", 0);
+  PutPoolDataByName( "ABSHEAD", "_tlr_no", 0, 0, "888886", 0);
+
+    /* 上传核心报文体数据 */
+    PutPoolDataByName ( "BUSIIB", "acct", 0, 0, acc, 0);    /* 账号 */
+    PutPoolDataByName ( "BUSIIB", "curAcct", 0, 0, subacc, 0);       /* 子账号 */
+    PutPoolDataByName ( "PAGTBUF", "currtype", 0, 0, "01", 0);       /* 币种 */
+    PutPoolDataByName ( "BUSIIB", "cashFlg", 0, 0, "2", 0);          /* 钞汇标志 */
+    PutPoolDataByName ( "BUSIIB", "openBrchNm", 0, 0, subacc, 0);    /* 开户网点 */
+    PutPoolDataByName ( "BUSIIB", "bgnDt", 0, 0, bgn_date, 0);       /* 起始日期 */
+    PutPoolDataByName ( "BUSIIB", "endDt", 0, 0, end_date, 0);       /* 结束日期 */
+    PutPoolDataByName ( "BUSIIB", "turnPageBgnPos", 0, 0, (char *)&bgn_no, 0);      /* 起始位置 */
+    PutPoolDataByName ( "BUSIIB", "turnPageShowQnt", 0, 0, (char *)&get_num, 0);    /* 显示数量 */
+
+    
+    trim( seqno );
+    sprintf( SvrName, "QryDtlSvr|%s", seqno );
+    WriteLog(ERR_LVL, "调用服务SvrName[%s]", SvrName);
+
+    if(0 != CommClient( SvrName ))
+    {
+        WriteLog(ERR_LVL,"ERROR:调用QryDtlSvr错");
+        return -1;
+    }
+    WriteLog(ERR_LVL, "调用核心接口5005成功");
+	
+	return ( 0 );
+}

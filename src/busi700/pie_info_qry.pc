@@ -1,0 +1,372 @@
+/*****************************************************
+**函数描述     : 零存整取账号基本信息查询 
+**函数用途     : 查询零存整取账号基本信息 
+**输入         ：  
+**输出         :  
+**创建日期     ：2013/04/25
+**最后修改日期 ：
+**Create by    : wenfeng
+*****************************************************/
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <time.h>
+#include "pbconstval.h"
+#include "pbstructdef.h"
+#ifdef ORACLE_DATABASE
+EXEC SQL include "pbranchdb.h";
+#else
+#include "pbranchdb.h"
+#endif
+#include "pberrlog.h"
+#include "pbglbvardef.h"
+#include "pbbasefunc.h"
+#include "pbsrv.h"
+#include "pqds.h"
+
+EXEC SQL  include "pb_s_agt_batch.h";
+long FixGetTerm();
+long GetRealTerm();
+long AccQryPub5001();
+
+int
+pie_Info_Qry()
+{
+	int ret;
+	char accTyp[1+1];				/*帐号类型*/
+	char Acc[20+1];					/*帐号*/
+	char fixAcct[32+1];				/*定期帐号*/
+	char tmpstr[256+1];
+	char err_msg[256+1];
+	char tran_seqno[10+1];
+  char tmp_date[9+1];
+  char op_dt[9+1];
+  char due_dt[9+1];
+  char last_txn_date[9+1];    /*上次续存日*/
+	struct s_fix_led_info  fix_led_info;
+	double subAmt = 0.00;				/*续存金额*/
+	double curBal = 0.00;      
+	long saveTerm = 0;				/*总期数*/
+	long curSaveTerm = 0;    			/*已存期数*/
+	long term_tmp = 0;				/*当前应存期数*/
+	long overDueTerm=0;				/*漏存期数*/
+	long i;
+	long errcode = 0;
+	long hoststat = -1;
+	int cur_date = 0;
+	int date = 0;
+	int date1 = 0;
+
+	memset(accTyp,              0x00,   sizeof(accTyp));
+	memset(Acc,                 0x00,   sizeof(Acc));
+	memset(fixAcct,             0x00,   sizeof(fixAcct));
+	memset(&fix_led_info,       0x00,   sizeof(struct s_fix_led_info));
+	memset(err_msg,             0x00,   sizeof(err_msg));
+	memset(tran_seqno,          0x00,   sizeof(tran_seqno));
+	memset(op_dt,               0x00,   sizeof(op_dt));
+	memset(due_dt,              0x00,   sizeof(due_dt));
+	memset(last_txn_date,       0x00,   sizeof(last_txn_date));
+	
+	/* 从变量池取值 */
+	GetPoolDataByName("BUSIIB", "acctTyp", 0, 0, accTyp, 0);
+	GetPoolDataByName("BUSIIB", "acct", 0, 0, Acc, 0);
+	GetPoolDataByName("BUSIIB", "billNb", 0, 0, fixAcct, 0);
+	WriteLog(APP_LVL, "%s!", accTyp);
+	WriteLog(APP_LVL, "%s!", Acc);
+	WriteLog(APP_LVL, "%s!", fixAcct);
+	
+    	/* 获取流水号信息 */
+	GetPoolDataByName("ABSHEAD", "_seq_no", 0, 0, tran_seqno, 0);
+	/* 判断 */
+	if(accTyp[0] == '0')			/*教育储蓄*/
+	{
+		WriteLog(APP_LVL, "教育储蓄账号");
+	}
+	else if(accTyp[0] == '1')		/*零存整取账号*/
+	{
+		WriteLog(APP_LVL, "零存整取账号");
+	}
+	else
+	{
+		 
+		 errcode = 99999;
+		 strcpy(err_msg, "帐户类型非法!!!");
+		 PutPoolDataByName("ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0);
+		 PutPoolDataByName("ABSHEAD", "_error_code", 0, 0, err_msg, 0);
+		 return -1;
+	}
+	
+	/**Modified by MSJ for SC6000Z项目 20140517 - Start **/
+	trim( Acc );
+	trim( fixAcct );
+	WriteLog( APP_LVL, "Acc[%s], fixAcct[%s]", Acc, fixAcct );
+	ret = AccQryPub5001( Acc, fixAcct, "0" );
+	if( ret )
+	{
+		WriteLog( ERR_LVL, "调用5001查询账号[%s]信息失败", Acc );
+		errcode = 99999;
+		strcpy( err_msg, "调用5001查询账号失败!" );
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&errcode, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		return ( -1 );
+	}
+
+  GetPoolDataByName("BUSIIB2", "Fixacct", 0, 0, fix_led_info.fix_ledger.acc, 0);
+  GetPoolDataByName("BUSIIB2", "FixopenBrchID", 0, 0, fix_led_info.fix_ledger.inst_no, 0);
+  GetPoolDataByName("BUSIIB2", "FixopenDt", 0, 0, op_dt, 0);
+  	WriteLog(APP_LVL, "hyz1日期[%s]", op_dt);
+  GetPoolDataByName("BUSIIB2", "FixacctStat", 0, 0, fix_led_info.fix_ledger.flag, 0);
+  /**GetPoolDataByName("BUSIIB2", "FixacctTyp", 0, 0, fix_led_info.fix_ledger.crdr_recd, 0);**/
+  GetPoolDataByName("BUSIIB2", "FixcurrencyTyp", 0, 0, fix_led_info.fix_ledger.curr_type, 0);
+  /**GetPoolDataByName("BUSIIB2", "FixcashFlg", 0, 0, fix_led_info.fix_ledger.crdr_recd, 0);**/
+  GetPoolDataByName("BUSIIB2", "FixavlBal", 0, 0, fix_led_info.fix_ledger.aval_bal, 0);
+  GetPoolDataByName("BUSIIB2", "Fixbal", 0, 0, fix_led_info.fix_ledger.bal, 0);
+  /**GetPoolDataByName("BUSIIB2", "FixintrstBgnDt", 0, 0, fix_led_info.fix_ledger.crdr_recd, 0);**/
+  GetPoolDataByName("BUSIIB2", "FixdueDt", 0, 0, due_dt, 0);
+  WriteLog(APP_LVL, "hyz2日期[%s]", due_dt);
+  /**
+  GetPoolDataByName("BUSIIB2", "FixintrstRate", 0, 0, fix_led_info.fix_ledger.crdr_recd, 0);
+  **/
+  GetPoolDataByName("BUSIIB2", "FixcustID", 0, 0, fix_led_info.fix_ledger.cstm_no, 0);
+  GetPoolDataByName("BUSIIB2", "FixcustNm", 0, 0, fix_led_info.fix_ledger.acc_name, 0);
+  GetPoolDataByName("BUSIIB", "voucherNo", 0, 0, fix_led_info.fix_ledger.crdr_recd, 0);
+  GetPoolDataByName("BUSIIB", "amt", 0, 0, fix_led_info.fix_ledger.mon_amt, 0);  
+  	WriteLog(APP_LVL, "mon_amt[%s]", fix_led_info.fix_ledger.mon_amt);
+  GetPoolDataByName("BUSIIB", "tranDate", 0, 0, last_txn_date, 0);  
+  	WriteLog(APP_LVL, "hyz3日期last_txn_date[%s]", last_txn_date);
+  /**Modified by MSJ for SC6000Z项目 20140517- End **/
+  
+	/*开户机构*/
+	PutPoolDataByName("BUSIIB", "openBrchID", 0, 0, 
+						fix_led_info.fix_ledger.inst_no, 0);
+	/*开户日期*/
+	trim(op_dt);
+	PutPoolDataByName("BUSIIB", "openDt", 0, 0, op_dt, 0);
+	WriteLog(APP_LVL, "开户日期[%s]", op_dt);
+	
+	/*到期日期*/
+	trim(due_dt);
+	PutPoolDataByName("BUSIIB", "tranDt", 0, 0, due_dt, 0);
+	WriteLog(APP_LVL, "到期日期[%s]", due_dt);
+	
+	/* 约定 存款期数 */
+	trim(fix_led_info.fix_ledger.crdr_recd);
+	
+	rdefmtdate(&date,"yyyymmdd", op_dt);
+	WriteLog(APP_LVL, "op_dt[%s]", op_dt);
+	WriteLog(APP_LVL, "date[%d]", date);
+	rdefmtdate(&date1,"yyyymmdd", due_dt);
+	/*总期数*/
+	if(FixGetTerm(date, date1, &term_tmp))
+	{
+		 WriteLog(ERR_LVL, "期数计算出错!!!");
+		 errcode = 99999;
+		 strcpy(err_msg, "期数计算出错!!!");
+		 PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode, 0);
+		 PutPoolDataByName("ABSHEAD","_error_code", 0, 0, err_msg, 0);
+		 return -1;
+	}
+	saveTerm = term_tmp;
+	memset(tmpstr, 0x00, sizeof(tmpstr));
+	sprintf(tmpstr, "%d", saveTerm);
+	PutPoolDataByName("BUSIIB", "backup1", 0, 0, tmpstr, 0);
+	WriteLog(APP_LVL, "约定 存款期数[%s]", tmpstr);
+	
+	memset(tmp_date, 0x00, sizeof(tmp_date));
+	GetPoolDataByName("PBSYS", "PbDate", 0, 0, tmp_date, 0);
+	rtrim(tmp_date);
+	rdefmtdate(&cur_date,"yyyymmdd", tmp_date);
+	WriteLog(APP_LVL, "tmp_date[%s]", tmp_date);
+	if(FixGetTerm(date, cur_date, &term_tmp))
+	{
+		 WriteLog(ERR_LVL, "期数计算出错!!!");
+		 errcode = 99999;
+		 strcpy(err_msg, "期数计算出错!!!");
+		 PutPoolDataByName("ABSHEAD","app_err_no", 0, 0, (char *)&errcode, 0);
+		 PutPoolDataByName("ABSHEAD","_error_code", 0, 0, err_msg, 0);
+		 return -1;
+	}
+	WriteLog(APP_LVL, "term_tmp[%d]", term_tmp);
+	/* 漏存期数 */
+	overDueTerm = atoi(fix_led_info.fix_ledger.crdr_recd);
+	memset(tmpstr, 0x00, sizeof(tmpstr));
+	sprintf(tmpstr, "%ld", overDueTerm);
+	if( overDueTerm>0 )
+	{
+		PutPoolDataByName("BUSIIB", "backup3", 0, 0, tmpstr, 0);
+	}
+	else 
+	{
+		PutPoolDataByName("BUSIIB", "backup3", 0, 0, "0", 0);
+	}	
+	
+	/*已存期数*/
+	curSaveTerm = atof(fix_led_info.fix_ledger.bal) / atof(fix_led_info.fix_ledger.mon_amt);
+	WriteLog(ERR_LVL, "余额bal:%f,每月存取mon_amt:%f,", atof(fix_led_info.fix_ledger.bal), atof(fix_led_info.fix_ledger.mon_amt) );
+	WriteLog(ERR_LVL, "存期%d", curSaveTerm);
+	memset(tmpstr, 0x00, sizeof(tmpstr));
+	sprintf(tmpstr, "%ld", curSaveTerm);
+	PutPoolDataByName("BUSIIB", "backup2", 0, 0, tmpstr, 0); 
+	
+	/* 是否漏存 */
+	
+	WriteLog(APP_LVL, "%ld,%ld,term_tmp:%ld,curSaveTerm:%ld,", date,cur_date, term_tmp, curSaveTerm);	
+	if(atoi(fix_led_info.fix_ledger.crdr_recd) > 0)
+	{
+		PutPoolDataByName("BUSIIB", "overDueFlg", 0, 0, "Y", 0); 
+	}
+	else
+	{
+		PutPoolDataByName("BUSIIB", "overDueFlg", 0, 0, "N", 0); 
+	}
+	 
+	/*续存金额*/
+	/*subAmt = atof(fix_led_info.fix_ledger.mon_amt) * curSaveTerm;*/ 
+	subAmt = atof(fix_led_info.fix_ledger.mon_amt);  
+	WriteLog(APP_LVL, "续存金额mon_amt[%s]", fix_led_info.fix_ledger.mon_amt);
+		WriteLog(APP_LVL, "续存金额subAmt[%f]", subAmt);
+	memset(tmpstr, 0x00, sizeof(tmpstr));
+	sprintf(tmpstr, "%-0.2f", subAmt);
+	PutPoolDataByName("BUSIIB", "amt", 0, 0, tmpstr, 0);
+	/* 余额 */
+	WriteLog(ERR_LVL, "余额%s", fix_led_info.fix_ledger.bal);
+	sprintf(fix_led_info.fix_ledger.bal, "%-0.2f", atof(fix_led_info.fix_ledger.bal));
+	trim(fix_led_info.fix_ledger.bal);
+	PutPoolDataByName("BUSIIB", "bal", 0, 0, fix_led_info.fix_ledger.bal, 0);
+	/*上次续存日*/
+	PutPoolDataByName("BUSIIB", "bgnDt", 0, 0, last_txn_date, 0);	
+	WriteLog(APP_LVL, "上次续存日[%s]", last_txn_date);
+  
+	return(0);
+}
+/*
+ *  Name :  FixGetTerm
+ *  Action: 取存期数
+ *  Return: 0 -- 成功；other -- 失败；
+ *  Input:
+ *        date1 : 日期1
+ *        date2 : 日期2
+ *  Output:
+ *        term_out : 存期数 date1与date2须为对日才有存期数
+ *  Author: WF
+ *  Date:   2013/05/10
+ */
+long
+FixGetTerm(date1, date2, term_out)
+    long    date1;        /*** 日期1 ***/
+    long    date2;        /*** 日期2 ***/
+    long    *term_out;    /*** 输出的存期 ***/
+{
+    char    real_term[7];
+   	char    str_tmp[7];
+   	long     ret_tmp;
+	long     int_tmp;
+
+	memset( real_term, 0, sizeof( real_term ));
+ 	ret_tmp = GetRealTerm( date1, date2, 0, real_term );
+
+	WriteLog( ERR_LVL, "取实际!code[%d]date1[%d]date2[%d]\n", \
+		 ret_tmp, date1, date2 );
+	if ( ret_tmp < 0 )
+	{
+		WriteLog( ERR_LVL, "取实际存期错!code[%d]date1[%d]date2[%d]\n", \
+		 ret_tmp, date1, date2 );
+		return(-1);
+	}
+
+	int_tmp = 0;
+	memset( str_tmp, 0, sizeof( str_tmp ));
+	strncpy( str_tmp, real_term, 2 );
+	int_tmp = atoi( str_tmp ) * 12;
+
+ 	memset( str_tmp, 0, sizeof( str_tmp ));
+	strncpy( str_tmp, real_term, 2 );
+
+	int_tmp = atoi( str_tmp ) * 12;
+
+	memset( str_tmp, 0, sizeof( str_tmp ));
+	strncpy( str_tmp, &real_term[2], 2 );
+
+	int_tmp += atoi( str_tmp );
+
+	*term_out = int_tmp;
+
+	return(0);
+}
+
+/******************************************************************************
+ * Function: GetRealTerm()
+ * Action  : 计算实际存期 
+ * Inputs  : 日期1，日期2，处理标志
+ * Outputs : 实际存期
+ * Return  :  0 -- 成功
+ *           -1 -- 调用ESQL/C函数失败，-2 -- 参数错，-3 -- 存期越界
+ ******************************************************************************/
+long
+GetRealTerm(date1, date2, flag, real_term)
+    long date1;        /* 日期1 */
+    long date2;        /* 日期2 */
+    long  flag;         /* 处理标志(0 -- 按月处理，1 -- 按日处理) */
+    char * real_term;  /* 输出的实际存期 */
+{
+    short  i_date1[3]; /* 日期1的分离的年月日 */
+    short  i_date2[3]; /* 日期2的分离的年月日 */
+    short  inv_year;   /* 日期间隔的年 */
+    short  inv_month;  /* 日期间隔的月 */
+    short  inv_day;    /* 日期间隔的日 */
+    long    ret;        /* 系统调用返回值 */
+
+    if (date1 > date2) /* 参数错 */
+    {
+        return ( -2 );
+    }
+    if ((ret = rjulmdy(date1, i_date1)) < 0)
+    {
+        return ( -1 );
+    }
+    if ((ret = rjulmdy(date2, i_date2)) < 0)
+    {
+        return ( -1 );
+    }
+    if (flag == 0) /* 按月处理 */
+    {
+        /* 当日期2正好是月末时该月均以31天算 */
+		switch (i_date2[0])
+		{
+		case 4:
+		case 6:
+		case 9:
+		case 11:
+            if (i_date2[1] == 30)
+                i_date2[1] = 31;
+			break;
+		case 2:
+            if ((rleapyear(i_date2[2]) == 1 && i_date2[1] == 29) ||
+                (rleapyear(i_date2[2]) == 0 && i_date2[1] == 28))
+                 i_date2[1] = 31;
+			break;
+		dafault:
+			break;
+        }
+    }
+    inv_day = i_date2[1] - i_date1[1]; /* 计算间隔的日 */
+    if (inv_day < 0) /* 是否要借位 */
+    {
+        inv_day += 31;
+        i_date2[0] -- ;
+    }
+    inv_month = i_date2[0] - i_date1[0];   /* 计算间隔的月 */
+    if (inv_month < 0) /* 是否要借位 */
+    {
+        inv_month += 12;
+        i_date2[2] -- ;
+    }
+    inv_year = i_date2[2] - i_date1[2];    /* 计算间隔的年 */
+    if (inv_year > 99) /* 存期年是否越界 */
+    {
+        return ( -3 );
+    }
+    /* 输出存期 */
+    sprintf(real_term, "%02d%02d%02d", inv_year, inv_month, inv_day);
+    return ( 0 );
+}

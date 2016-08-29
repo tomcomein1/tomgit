@@ -1,0 +1,544 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <time.h>
+#include "atmi.h"
+#include "fml32.h"
+#include "pbconstval.h"
+#include "pbstructdef.h"
+#ifdef ORACLE_DATABASE
+EXEC SQL include "pbranchdb.h";
+#else
+#include "pbranchdb.h"
+#endif
+#include "pberrlog.h"
+#include "pbglbvardef.h"
+#include "pbbasefunc.h"
+#include "pbvarmacro.h"
+EXEC SQL include "pbsrv.h";
+
+unsigned long GetDateTime(char *date_time, const char *fmt);
+extern char * sca_iconv(char* from_charset, char* to_charset, char *inbuf);
+
+/*CBS1000210代发查询*/
+int bat_qry_prn()
+{
+    char DataBuff[PBFDATA_LEN + 1];
+    int ret = 0;
+    char *p = NULL;
+
+    memset(DataBuff, 0x00, sizeof(DataBuff));
+
+    ret = bat_qry_prn_proc(DataBuff, "2");
+
+    if (ret == 0)
+    {
+        PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "0", 0 );
+    }
+    else
+    {
+        PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        WriteLog(ERR_LVL, "call bat_qry_prn_proc error!");
+        return -1;
+    }
+
+    strcpy( (char *)PkgBuff.DataBuff, DataBuff );
+    PkgBuff.DataLen = strlen( DataBuff ) + 1;
+
+    return 0;
+}
+
+/*代收产品查询 CBS1000250*/
+int bat_qry_prn_new()
+{
+    char DataBuff[PBFDATA_LEN + 1];
+    int ret = 0;
+
+    memset(DataBuff, 0x00, sizeof(DataBuff));
+
+    ret = bat_qry_prn_proc(DataBuff, "1");
+
+    if (ret == 0)
+        PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "0", 0 );
+    else
+    {
+        PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        WriteLog(ERR_LVL, "call bat_qry_prn_proc error!");
+        return -1;
+    }
+
+    /*计算返回报文长度*/
+    strcpy( (char *)PkgBuff.DataBuff, DataBuff );
+    PkgBuff.DataLen = strlen( DataBuff ) + 1;
+
+    return 0;
+}
+
+/*flag 1-代收 2-代发*/
+int bat_qry_prn_proc (char *DataBuff, char *flag)
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+        char com_acc[32];     /*企业账号*/
+        char batch_no[20];    /*批次号*/
+        char inst_no[9+1];    /*签约机构*/
+        char item_name[120];  /*项目名称*/
+        char Deputize_id[2+1];       /*1-代收 2-代发*/
+    EXEC SQL END DECLARE SECTION;
+
+    char trandate[12 + 1];
+    char seqno[30 + 1];
+
+    int ret = 0;
+    char err_msg[61];
+    long err_code = 0, rec_num = 0;
+
+    memset (trandate, 0x00, sizeof(trandate) );
+    GetPoolDataByName( "PBSYS", "PbDate", 0, 0, trandate, 0 );
+    trim( trandate );
+    memset (seqno, 0x00, sizeof(seqno) );
+    GetPoolDataByName( "PBSYS", "SrcJourNo", 0, 0, seqno, 0 );
+    trim( seqno );
+
+    /*写报文头*/
+    write_pub_header_other (DataBuff, seqno);
+
+    trim( flag );
+    /*取报文企业账户*/
+    memset (com_acc, 0x00, sizeof(com_acc));
+    GetPoolDataByName("BUSIIB", "acct", 0, 0, com_acc, 0);
+    rtrim(com_acc);
+    EXEC SQL DECLARE bat1_cur  CURSOR FOR
+            select batch_no,inst_no
+              from t_sc_agt_para_mgmt 
+               where com_acc = :com_acc;
+    if (sqlca.sqlcode < 0 )
+    {
+        WriteLog(ERR_LVL, "声明游标语句失败[%d]", sqlca.sqlcode);
+        strcpy( err_msg, "SYSTEM ERROR.WAITING RETRY");
+        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+        return -1;
+    }
+    EXEC SQL OPEN bat1_cur;
+    if (sqlca.sqlcode < 0 )
+    {
+        WriteLog(ERR_LVL, "打开SQL语句失败[%d]", sqlca.sqlcode);
+        strcpy( err_msg, "SYSTEM ERROR.WAITING RETRY");
+        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+        EXEC SQL CLOSE bat1_cur;
+        EXEC SQL FREE bat1_cur;
+        return -1;
+    }
+
+    while(1)
+    {
+        memset( batch_no, 0x00, sizeof( batch_no ) );
+        memset( inst_no, 0x00, sizeof( inst_no ) );
+        memset( item_name, 0x00, sizeof( item_name ) );
+        memset( Deputize_id, 0x00, sizeof( Deputize_id ) );
+        EXEC SQL FETCH bat1_cur INTO :batch_no, :inst_no;
+        if (sqlca.sqlcode == 100)
+        {
+            WriteLog(ERR_LVL, "退出循环! rec_num=[%d]", rec_num);
+            break;
+        }
+        else if (sqlca.sqlcode != 0)
+        {
+            WriteLog(ERR_LVL, "获取游标失败![%d]", sqlca.sqlcode);
+            strcpy( err_msg, "SYSTEM ERR.OPEN CURSOR ERR!");
+            PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+            EXEC SQL CLOSE bat1_cur;
+            EXEC SQL FREE bat1_cur;
+            return -1;
+        }
+        rtrim( batch_no );
+        rtrim( inst_no );
+        EXEC SQL select Deputize_id,item_name into :Deputize_id, :item_name
+                 from t_sc_agt_bat_item_mgmt
+                 where batch_no =:batch_no
+                 and inst_no=:inst_no;
+        if (sqlca.sqlcode != 0)
+        {
+            WriteLog(ERR_LVL, "查询代理批量项目管理表失败! sqlcode=[%d]", sqlca.sqlcode );
+            strcpy( err_msg, "Query bat_item_mgmt error");
+            PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+            EXEC SQL CLOSE bat1_cur;
+            EXEC SQL FREE bat1_cur;
+            return -1;
+        }
+
+        rtrim( Deputize_id );
+        rtrim( item_name );
+
+WriteLog(APP_LVL, "TTTT: batch_no[%s]inst_no[%s]Deputize_id[%s]", batch_no, inst_no, Deputize_id);
+
+        if( strcmp( Deputize_id, flag ) != 0 )
+            continue;
+
+        if (rec_num == 0)
+        {
+            write_pub_header_status(DataBuff, "000000", "SUCC");
+            sprintf(DataBuff + strlen(DataBuff),
+                    "  </header>\n"
+                    "  <body>\n"
+                    "    <response>\n"
+                    "      <list>\n");
+        }
+        sprintf( DataBuff + strlen(DataBuff), "        <v>\n" );
+        sprintf( DataBuff + strlen(DataBuff), "          <proNo>%s</proNo>\n", batch_no );
+        sprintf( DataBuff + strlen(DataBuff), "          <proNm>%s</proNm>\n", item_name );
+        sprintf( DataBuff + strlen(DataBuff), "        </v>\n" );
+        rec_num++;
+        if( rec_num > 100 ) /*下挂只支持一百条*/
+            break;
+    }
+
+    EXEC SQL CLOSE bat1_cur;
+    EXEC SQL FREE bat1_cur;
+
+    if (rec_num == 0)
+    {
+        WriteLog(ERR_LVL, "未找到该企业账号签约项目");
+        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, "Not fund sign item", 0 );
+        return -1;
+    }
+    else
+    {
+        sprintf( DataBuff + strlen(DataBuff),
+                 "      </list>\n"
+                 "    </response>\n"
+                 "  </body>\n"
+                 "</transaction>\n" );
+    }
+
+    return 0;
+}
+
+/*写文件头状态部分信息*/
+int write_pub_header_status(char *ret_buff, char *retCd, char *desc)
+{
+    char thsdesc[256 + 1];
+    char thslocation[256 + 1];
+
+    memset(thsdesc, 0x00, sizeof(thsdesc) );
+    memset(thslocation, 0x00, sizeof(thslocation) );
+    GetPoolDataByName( "BUSIIB", "thsdesc", 0, 0, thsdesc, 0 );
+    GetPoolDataByName( "BUSIIB", "thslocation", 0, 0, thslocation, 0 );
+
+    return ( sprintf(ret_buff + strlen(ret_buff),
+                     "    <status>\n"
+                     "      <thsretCd>%s</thsretCd>\n"
+                     "      <thsdesc>%s</thsdesc>\n"
+                     "      <thslocation>%s</thslocation>\n"
+                     "      <thsmbrCd>6500</thsmbrCd>\n"
+                     "      <thsappCd>NNS</thsappCd>\n"
+                     "    </status>\n",
+                     retCd, desc, thslocation) );
+}
+
+/*写头前半部分*/
+int write_pub_header_other(char *ret_buffer, char *_seqno )
+{
+    /*公共报文头*/
+    struct net_pub_header
+    {
+        char thver[6 + 1];
+        char thcn2utf8[1 + 1];
+        char thpsndMbrCd[4 + 1];
+        char thpsndAppCd[3 + 1];
+        char thpsndDt[8 + 1];
+        char thpsndTm[6 + 1];
+        char thprcvMbrCd[4 + 1];
+        char thprcvAppCd[3 + 1];
+        char thmmsgCd[10 + 1];
+        char thmcallTyp[4 + 1];
+        char thmseqNb[15 + 1];
+        char thmsndMbrCd[4 + 1];
+        char thmsndAppCd[3 + 1];
+        char thmsndDt[8 + 1];
+        char thmsndTm[6 + 1];
+        char thmrcvMbrCd[4 + 1];
+        char thmrcvAppCd[3 + 1];
+        char thmrefMsgCd[10 + 1];
+        char thmrefCallTyp[4 + 1];
+        char thmrefSndMbrCd[4 + 1];
+        char thmrefSndAppCd[3 + 1];
+        char thmrefSndDt[8 + 1];
+        char thmrefSeqNb[15 + 1];
+        char thsretCd[6 + 1];
+        char thsdesc[256 + 1];
+        char thslocation[256 + 1];
+        char thsmbrCd[4 + 1];
+        char thsappCd[3 + 1];
+    };
+    struct net_pub_header pkg_head;  /*共公报文头*/
+
+    char ret_msgcd[10 + 1];
+
+    memset(&pkg_head, 0x00, sizeof(pkg_head) );
+    /***写包头信息***/
+    GetPoolDataByName( "BUSIIB", "thver", 0, 0, pkg_head.thver, 0 );
+    GetPoolDataByName( "BUSIIB", "thcn2utf8", 0, 0, pkg_head.thcn2utf8, 0 );
+    GetPoolDataByName( "BUSIIB", "thpsndMbrCd", 0, 0, pkg_head.thpsndMbrCd, 0 );
+    GetPoolDataByName( "BUSIIB", "thpsndAppCd", 0, 0, pkg_head.thpsndAppCd, 0 );
+    GetPoolDataByName( "BUSIIB", "thpsndDt", 0, 0, pkg_head.thpsndDt, 0 );
+    GetPoolDataByName( "BUSIIB", "thpsndTm", 0, 0, pkg_head.thpsndTm, 0 );
+    GetPoolDataByName( "BUSIIB", "thprcvMbrCd", 0, 0, pkg_head.thprcvMbrCd, 0 );
+    GetPoolDataByName( "BUSIIB", "thprcvAppCd", 0, 0, pkg_head.thprcvAppCd, 0 );
+    GetPoolDataByName( "BUSIIB", "thmmsgCd", 0, 0, pkg_head.thmmsgCd, 0 );
+    GetPoolDataByName( "BUSIIB", "thmcallTyp", 0, 0, pkg_head.thmcallTyp, 0 );
+    GetPoolDataByName( "BUSIIB", "thmseqNb", 0, 0, pkg_head.thmseqNb, 0 );
+    GetPoolDataByName( "BUSIIB", "thmsndMbrCd", 0, 0, pkg_head.thmsndMbrCd, 0 );
+    GetPoolDataByName( "BUSIIB", "thmsndAppCd", 0, 0, pkg_head.thmsndAppCd, 0 );
+    GetPoolDataByName( "BUSIIB", "thmsndDt", 0, 0, pkg_head.thmsndDt, 0 );
+    GetPoolDataByName( "BUSIIB", "thmsndTm", 0, 0, pkg_head.thmsndTm, 0 );
+    GetPoolDataByName( "BUSIIB", "thmrcvMbrCd", 0, 0, pkg_head.thmrcvMbrCd, 0 );
+    GetPoolDataByName( "BUSIIB", "thmrcvAppCd", 0, 0, pkg_head.thmrcvAppCd, 0 );
+    GetPoolDataByName( "BUSIIB", "thmrefMsgCd", 0, 0, pkg_head.thmrefMsgCd, 0 );
+    GetPoolDataByName( "BUSIIB", "thmrefCallTyp", 0, 0, pkg_head.thmrefCallTyp, 0 );
+    GetPoolDataByName( "BUSIIB", "thmrefSndMbrCd", 0, 0, pkg_head.thmrefSndMbrCd, 0 );
+    GetPoolDataByName( "BUSIIB", "thmrefSndAppCd", 0, 0, pkg_head.thmrefSndAppCd, 0 );
+    GetPoolDataByName( "BUSIIB", "thmrefSndDt", 0, 0, pkg_head.thmrefSndDt, 0 );
+    GetPoolDataByName( "BUSIIB", "thmrefSeqNb", 0, 0, pkg_head.thmrefSeqNb, 0 );
+
+    GetDateTime( pkg_head.thpsndDt, "ymd" );
+    GetDateTime( pkg_head.thpsndTm, "HMS" );
+    rtrim( _seqno );
+
+    memset(ret_msgcd, 0x00, sizeof(ret_msgcd) );
+    GetPoolDataByName( "BUSIIB", "thmmsgCd", 0, 0, ret_msgcd, 0 );
+    ret_msgcd[9] = '1';
+WriteLog(APP_LVL, "TTTT: ret_msgcd[%s]", ret_msgcd);
+
+    return ( sprintf( ret_buffer,
+                      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                      "<transaction>\n"
+                      "  <header>\n"
+                      "    <ver>%s</ver>\n"
+                      "    <cn2utf8>%s</cn2utf8>\n"
+                      "    <pnt>\n"
+                      "      <thpsndMbrCd>6500</thpsndMbrCd>\n"
+                      "      <thpsndAppCd>CBS</thpsndAppCd>\n"
+                      "      <thpsndDt>%s</thpsndDt>\n"
+                      "      <thpsndTm>%s</thpsndTm>\n"
+                      "      <thprcvMbrCd>0000</thprcvMbrCd>\n"
+                      "      <thprcvAppCd>ESB</thprcvAppCd>\n"
+                      "    </pnt>\n"
+                      "    <msg>\n"
+                      "      <thmmsgCd>%s</thmmsgCd>\n"
+                      "      <thmcallTyp>%s</thmcallTyp>\n"
+                      "      <thmseqNb>%s%s</thmseqNb>\n"
+                      "      <thmsndMbrCd>6500</thmsndMbrCd>\n"
+                      "      <thmsndAppCd>CBS</thmsndAppCd>\n"
+                      "      <thmsndDt>%s</thmsndDt>\n"
+                      "      <thmsndTm>%s</thmsndTm>\n"
+                      "      <thmrcvMbrCd>0000</thmrcvMbrCd>\n"
+                      "      <thmrcvAppCd>ESB</thmrcvAppCd>\n"
+                      "      <thmrefMsgCd>%s</thmrefMsgCd>\n"
+                      "      <thmrefCallTyp>%s</thmrefCallTyp>\n"
+                      "      <thmrefSndMbrCd>%s</thmrefSndMbrCd>\n"
+                      "      <thmrefSndAppCd>%s</thmrefSndAppCd>\n"
+                      "      <thmrefSndDt>%s</thmrefSndDt>\n"
+                      "      <thmrefSeqNb>%s</thmrefSeqNb>\n"
+                      "    </msg>\n" ,
+                      pkg_head.thver, pkg_head.thcn2utf8, pkg_head.thpsndDt, pkg_head.thpsndTm, ret_msgcd, pkg_head.thmcallTyp,
+                      pkg_head.thpsndDt, _seqno + 3, pkg_head.thpsndDt, pkg_head.thpsndTm, pkg_head.thmmsgCd,
+                      pkg_head.thmcallTyp, pkg_head.thmsndMbrCd, pkg_head.thmsndAppCd, pkg_head.thpsndDt, pkg_head.thmseqNb ) );
+}
+
+/*发送到通信前置机*/
+int  bat_qry_prn_after( )
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+        char transtatus[20 + 1];
+        char ret_msg[80 + 1];
+        char trandate[12];
+        char seqno[12];
+    EXEC SQL END   DECLARE SECTION;
+    char ret_value[21];
+    char err_msg[256];
+    char DataBuff[PBFDATA_LEN + 1];
+    int  ret = 0;
+    char s_msgtype[8 + 1];
+    long l_msgtype;
+    char *p = NULL;
+    char thmsndAppCd[3+1];
+    struct PKG_DATA_BUFF pkg;
+
+    memset(ret_value, 0x00, sizeof(ret_value) );
+    GetPoolDataByName( "BUSIIB", "thsretCd", 0, 0, ret_value, 0 );
+    rtrim(ret_value);
+
+    /*取该流水平台日期流水*/
+    memset(trandate, 0x00, sizeof(trandate));
+    memset(seqno, 0x00, sizeof(seqno) );
+    GetPoolDataByName( "PBSYS", "PbDate", 0, 0, trandate, 0 );
+    GetPoolDataByName( "PBSYS", "SrcJourNo", 0, 0, seqno, 0 );
+
+    memset(thmsndAppCd, 0x00, sizeof(thmsndAppCd) );
+    GetPoolDataByName( "BUSIIB", "thmsndAppCd", 0, 0, thmsndAppCd, 0 );
+
+    memset(transtatus, 0x00, sizeof(transtatus));
+    if ( atol(ret_value) == 0)
+    {
+        p=sca_iconv("GB18030", "UTF-8", PkgBuff.DataBuff);
+        memset(PkgBuff.DataBuff,0,sizeof(PkgBuff.DataBuff));
+        memcpy(PkgBuff.DataBuff, p, strlen(p));
+
+        PkgBuff.DataLen = strlen(p) + 1;
+WriteLog( APP_LVL, "RUN: DataBuff succ len1[%ld]", strlen(p) + 1 );
+     
+        free(p); 
+        p = NULL;
+
+        strcpy(transtatus, "0");
+        strcpy(ret_msg, "交易成功");
+    }
+    else
+    {
+        /*报错自动写报错报文*/
+        memset(DataBuff, 0x00, sizeof(DataBuff) );
+        write_pub_header_other (DataBuff, seqno);
+
+        memset(err_msg, 0x00, sizeof(err_msg));
+        GetPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+        write_pub_header_status(DataBuff, "399999", err_msg);
+        sprintf( DataBuff + strlen(DataBuff), "<body>\n"
+                                              "  <response>\n"
+                                              "  </response>\n"
+                                              "</body>\n"
+                                              "</transaction>\n");
+
+        p=sca_iconv("GB18030", "UTF-8", DataBuff);
+        memset(PkgBuff.DataBuff,0,sizeof(PkgBuff.DataBuff));
+        memcpy(PkgBuff.DataBuff, p, strlen(p));
+
+WriteLog( APP_LVL, "RUN: DataBuff err len1[%ld]", strlen(p) + 1 );
+        PkgBuff.DataLen = strlen(p) + 1;
+
+        free(p); 
+        p = NULL;
+
+        /*计算返回报文长度*/
+        strcpy(transtatus, "1");
+        strcpy(ret_msg, "交易失败");
+    }
+
+    /*只修改平台日志表*/
+    EXEC SQL UPDATE T_PB_NET_LOG SET transtats[1,1]=:transtatus[0],
+                result = :ret_msg
+                WHERE trandate=:trandate
+       	    AND seqno=:seqno;
+    if( SQLCODE != 0 )
+    {
+        WriteLog( ERR_LVL, "更新网银日志表失败[%s][%s][%d]",
+                  trandate, seqno, SQLCODE );
+    }
+
+    MsgFlagHandleNew( "700" , 'S' , "3"  ) ;
+    memset( s_msgtype, 0, sizeof(s_msgtype) );
+    memcpy( s_msgtype, seqno + 2, 8 );
+    l_msgtype = atol( s_msgtype );
+    TraceCodeHandleNew ( "700" , 'S' ,  &l_msgtype ) ;
+
+    /** 赋值交易属性 **/
+    PutPoolData30(V_SrcID, 0 , 0 , "111", VAR_SrcID.cb);
+
+    rtrim(thmsndAppCd);
+    WriteLog(ERR_LVL, "RUN: appcd[%s]", thmsndAppCd);
+    if (strncmp(thmsndAppCd, "XYD", 3) == 0 || strncmp(thmsndAppCd, "FFT", 3) == 0)
+    {
+        memset(&pkg, 0x00, sizeof(struct PKG_DATA_BUFF) );
+        strcpy( pkg.DataBuff, PkgBuff.DataBuff);
+        memset( PkgBuff.DataBuff, 0x00, sizeof(PkgBuff.DataBuff));
+        sprintf( PkgBuff.DataBuff, "%08d%s", PkgBuff.DataLen, pkg.DataBuff);
+        PkgBuff.DataLen = PkgBuff.DataLen + 8;
+WriteLog(ERR_LVL, "DataBuff[%ld][%s]", PkgBuff.DataLen, PkgBuff.DataBuff);
+        ret = Comm_AcCall("700009|928000");
+    }
+    else
+    {
+WriteLog(ERR_LVL, "DataBuff[%ld][%s]", PkgBuff.DataLen, PkgBuff.DataBuff);
+        ret = Comm_AcCall("700001|928000");
+    }
+
+    if( ret < 0 )
+    {
+         WriteLog( ERR_LVL, "发送失败" );
+    }
+
+    return 0;
+}
+
+/*
+    filename: GetDateTime.c
+    function: 取当前系统日期时间，
+              按fmt指定字串格式
+              [y|Y - 定义年
+               m - 定义月
+               d|D - 定放日
+               H|h - 定义小时
+               M - 定义分钟
+               S|s - 定义秒
+               ]
+               其它分隔符原样输出
+*/
+unsigned long GetDateTime(char *date_time, const char *fmt)
+{
+    time_t    tbuf;
+    struct tm *t;
+    unsigned char c ;
+    char format_time[30];
+    const char format[] = "ymd HMS";
+    unsigned long nSysDate = 0;
+
+    memset(format_time, 0x00, sizeof(format_time) );
+
+    time(&tbuf);
+    t = (struct tm *)localtime(&tbuf);
+
+    if (*fmt == '\0')
+        fmt = format;
+
+    /*解读成指定格式*/
+    while(c = *fmt)
+    {
+        switch(c)
+        {
+        case 'y':
+        case 'Y':
+            sprintf(format_time + strlen(format_time), "%4.4d", t->tm_year + 1900);
+            break;
+        case 'm':
+            sprintf(format_time + strlen(format_time), "%2.2d", t->tm_mon + 1);
+            break;
+        case 'd':
+        case 'D':
+            sprintf(format_time + strlen(format_time), "%2.2d", t->tm_mday);
+            break;
+
+        case 'H':
+        case 'h':
+            sprintf(format_time + strlen(format_time), "%2.2d", t->tm_hour);
+            break;
+        case 'M':
+            sprintf(format_time + strlen(format_time), "%2.2d", t->tm_min);
+            break;
+        case 'S':
+        case 's':
+            sprintf(format_time + strlen(format_time), "%2.2d", t->tm_sec);
+            break;
+
+        default:
+            sprintf(format_time + strlen(format_time), "%c", c );
+            break;
+        } /* end switch*/
+        fmt++;
+        while (c == *fmt) fmt++;
+
+    } /*end while*/
+
+    strcpy(date_time, format_time );
+
+    nSysDate = (t->tm_year + 1900) * 10000 + (t->tm_mon + 1) * 100 + t->tm_mday;
+    return nSysDate;
+}

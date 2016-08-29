@@ -1,0 +1,339 @@
+/*PB3.0系统自动生成demo源码文件*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <time.h>
+#include "pbconstval.h" 
+#include "pbstructdef.h" 
+#ifdef ORACLE_DATABASE
+EXEC SQL include "pbranchdb.h";
+#else
+#include "pbranchdb.h"
+#endif
+#include "pberrlog.h"
+#include "pbglbvardef.h"
+#include "pbbasefunc.h"
+
+EXEC SQL BEGIN DECLARE SECTION;
+struct PKG_CBS0000470 {
+	char	acct[32+1];
+	char	currencyTyp[6+1];
+	char	bgnDt[8+1];
+	char	endDt[8+1];
+	char	turnPageBgnPos[32+1];
+	char	turnPageShowQnt[32+1];
+	char	backup2[128+1];
+	char	backup3[128+1];
+};
+
+struct PKG_CBS0000471 {
+	int		totalQnt;
+	char	currencyTyp[1+1];
+	char	balDate[8+1];
+	char	acct[32+1];
+	double	bal;
+	char	acctTyp[1+1];
+	char	memo[1+1];
+};
+EXEC SQL END DECLARE SECTION;
+
+int
+BankAccountQry( )
+{
+	int i;
+	int ret;
+	long    app_err_no = 0;
+    char    err_code[6+1];
+    char    err_msg[256+1];
+	char    ChkFlag[20+1];
+    char    CdmAccStat[60+1];
+    char    SdmAccStat[60+1];
+    char    FixAccStat[60+1];
+	char	LoanAccStat[60+1];
+    char    CardAccStat[60+1];
+	char    stat[100+1];
+    struct PKG_CBS0000470 PKGCBS470;
+    struct PKG_CBS0000471 PKGCBS471;
+
+    memset( err_code, 0x00, sizeof(err_code) );
+    memset( err_msg,  0x00, sizeof(err_msg)  );
+	memset( ChkFlag,  0x00, sizeof(ChkFlag)  );
+    memset( &PKGCBS470, 0x00, sizeof(struct PKG_CBS0000470) );
+    memset( &PKGCBS471, 0x00, sizeof(struct PKG_CBS0000471) );
+
+    memset( CdmAccStat, 0x00, sizeof(CdmAccStat) );
+    memset( SdmAccStat, 0x00, sizeof(SdmAccStat) );
+    memset( FixAccStat, 0x00, sizeof(FixAccStat) );
+    memset( LoanAccStat, 0x00, sizeof(LoanAccStat) );
+    memset( CardAccStat, 0x00, sizeof(CardAccStat) );
+	memset( stat, 0x00, sizeof(stat) );
+
+    GetPoolDataByName( "BUSIIB", "acct", 0, 0, PKGCBS470.acct, 0 );
+    if( strlen(PKGCBS470.acct) == 0 ) {
+        WriteLog( ERR_LVL, "ERR: acct不允许为空值!" );
+		app_err_no = 20003;
+        strcpy( err_code, "340002" );
+        strcpy( err_msg, "失败" );
+        PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, err_code, 0 );
+        PutPoolDataByName( "BUSIIB", "thsdesc",  0, 0, err_msg,  0 );
+        PutPoolDataByName( "ABSHEAD", "app_err_no",  0, 0, &app_err_no,  0 );
+        return( -1 );
+    }
+
+    GetPoolDataByName( "BUSIIB", "currencyTyp", 0, 0, PKGCBS470.currencyTyp, 0 );
+    if( strlen(PKGCBS470.currencyTyp) == 0 ) {
+        WriteLog( ERR_LVL, "ERR: currencyTyp不允许为空值!" );
+        strcpy( err_code, "340002" );
+        strcpy( err_msg, "失败" );
+        PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, err_code, 0 );
+        PutPoolDataByName( "BUSIIB", "thsdesc",  0, 0, err_msg,  0 );
+        return( -1 );
+    }
+
+    if( (ret = NetParaConv("currencyTyp")) < 0 ) {
+        WriteLog( ERR_LVL, "ERR: currencyTyp转换错误!" );
+        app_err_no = 99999;
+        strcpy( err_code, "999999" );
+        strcpy( err_msg, "取币种编码出错" );
+        PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, err_code, 0 );
+        PutPoolDataByName( "BUSIIB", "thsdesc",  0, 0, err_msg,  0 );
+        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, &app_err_no,  0 );
+        return( -1 );
+    }
+	memset( PKGCBS470.currencyTyp, 0x00, sizeof(PKGCBS470.currencyTyp) );
+    GetPoolDataByName( "PAGTBUF", "currtype", 0, 0, PKGCBS470.currencyTyp, 0 );
+	PutPoolDataByName( "BUSIIB", "currencyTyp", 0, 0, PKGCBS470.currencyTyp, 0 );
+
+    GetPoolDataByName( "BUSIIB", "bgnDt", 0, 0, PKGCBS470.bgnDt, 0 );
+    if( strlen(PKGCBS470.bgnDt) == 0 ) {
+        WriteLog( ERR_LVL, "ERR: bgnDt不允许为空值!" );
+		app_err_no = 99999;
+        strcpy( err_code, "340002" );
+        strcpy( err_msg, "失败" );
+        PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, err_code, 0 );
+        PutPoolDataByName( "BUSIIB", "thsdesc",  0, 0, err_msg,  0 );
+        PutPoolDataByName( "ABSHEAD", "app_err_no",  0, 0, &app_err_no,  0 );
+        return( -1 );
+    }
+
+    GetPoolDataByName( "BUSIIB", "endDt", 0, 0, PKGCBS470.endDt, 0 );
+    if( strlen(PKGCBS470.endDt) == 0 ) {
+        WriteLog( ERR_LVL, "ERR: endDt不允许为空值!" );
+		app_err_no = 99999;
+        strcpy( err_code, "340002" );
+        strcpy( err_msg, "失败" );
+        PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, err_code, 0 );
+        PutPoolDataByName( "BUSIIB", "thsdesc",  0, 0, err_msg,  0 );
+        PutPoolDataByName( "ABSHEAD", "app_err_no",  0, 0, &app_err_no,  0 );
+        return( -1 );
+    }
+
+    GetPoolDataByName( "BUSIIB", "turnPageBgnPos", 0, 0, PKGCBS470.turnPageBgnPos, 0 );
+    if( atoi(PKGCBS470.turnPageBgnPos) == 0 ) {
+		memset( PKGCBS470.turnPageBgnPos, 0x00, sizeof(PKGCBS470.turnPageBgnPos) );
+		sprintf( PKGCBS470.turnPageBgnPos, "%d", 1 );
+    }
+
+    GetPoolDataByName( "BUSIIB", "turnPageShowQnt", 0, 0, PKGCBS470.turnPageShowQnt, 0 );
+	if( atoi(PKGCBS470.turnPageShowQnt) == 0 || atoi(PKGCBS470.turnPageShowQnt) > 10 ) {
+		memset( PKGCBS470.turnPageShowQnt, 0x00, sizeof(PKGCBS470.turnPageShowQnt) );
+		sprintf( PKGCBS470.turnPageShowQnt, "%d", 10 );
+	}
+
+    GetPoolDataByName( "BUSIIB", "backup2", 0, 0, PKGCBS470.backup2, 0 );
+    GetPoolDataByName( "BUSIIB", "backup3", 0, 0, PKGCBS470.backup3, 0 );
+
+	/*
+	PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "0", 0 );
+	*/
+
+	WriteLog( ERR_LVL, "##################[%s][%s]", PKGCBS470.turnPageBgnPos, PKGCBS470.turnPageShowQnt );
+	PutPoolDataByName( "BUSIIB", "turnPageBgnPos", 0, 0, PKGCBS470.turnPageBgnPos, 0 );
+	PutPoolDataByName( "BUSIIB", "turnPageShowQnt", 0, 0, PKGCBS470.turnPageShowQnt, 0 );
+
+	ChkFlag[0] = '0';
+	ChkFlag[1] = '0';
+	ChkFlag[2] = '0';
+	PutPoolDataByName( "BUSIIB", "qryCls", 0, 0, "1", 0 );
+	PutPoolDataByName( "BUSIIB", "loanCreditFlg", 0, 0, ChkFlag, 0 );
+
+	ret = CommClient( "CoQryCSvr" );
+    if( ret != 0 )
+    {
+        WriteLog( ERR_LVL, "ERR: 通用客户查询及账号查询检查服务失败!" );
+        app_err_no = 99999;
+        GetPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+        strcpy( err_code, "310015" );
+        PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, err_code, 0 );
+        PutPoolDataByName( "BUSIIB", "thsdesc",  0, 0, err_msg,  0 );
+        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, &app_err_no,  0 );
+        return( -1 );
+    }
+
+    GetPoolDataByName( "PAGTBUF", "data1", 0, 0, CdmAccStat, 0 );
+    GetPoolDataByName( "PAGTBUF", "data2", 0, 0, SdmAccStat, 0 );
+    GetPoolDataByName( "PAGTBUF", "data3", 0, 0, FixAccStat, 0 );
+    GetPoolDataByName( "PAGTBUF", "data4", 0, 0, CardAccStat, 0 );
+    GetPoolDataByName( "PAGTBUF", "data5", 0, 0, LoanAccStat, 0 );
+    rtrim( CdmAccStat );
+    rtrim( SdmAccStat );
+    rtrim( FixAccStat );
+    rtrim( CardAccStat );
+    rtrim( LoanAccStat );
+
+    WriteLog( ERR_LVL, "#############[%s][%s][%s][%s][%s]",\
+		CdmAccStat, SdmAccStat, FixAccStat, LoanAccStat, CardAccStat );
+
+    if( strlen(CdmAccStat) > 0 ) {
+
+        if( CdmAccStat[0] != '0' ) {
+            app_err_no = 99999;
+            strcpy( stat, "销户");
+        } else if( CdmAccStat[1] != '0' ) {
+            app_err_no = 99999;
+            strcpy( stat, "冻结");
+        } else if( CdmAccStat[2] != '0' ) {
+            app_err_no = 20004;
+            strcpy( stat, "挂失");
+        } else {
+            strcpy( stat, "正常");
+        }
+    }
+
+    if( strlen(SdmAccStat) > 0 ) {
+
+        if( SdmAccStat[0] != '0' ) {
+            app_err_no = 99999;
+            strcpy( stat, "销户");
+        } else if( SdmAccStat[1] != '0' ) {
+            app_err_no = 99999;
+            strcpy( stat, "冻结");
+        } else if( SdmAccStat[2] != '0' ) {
+            app_err_no = 20004;
+            strcpy( stat, "挂失");
+        } else {
+            strcpy( stat, "正常");
+        }
+    }
+
+    if( strlen(FixAccStat) > 0 ) {
+
+        if( FixAccStat[0] != '0' ) {
+            app_err_no = 99999;
+            strcpy( stat, "销户");
+        } else if( FixAccStat[1] != '0' ) {
+            app_err_no = 99999;
+            strcpy( stat, "冻结");
+        } else if( FixAccStat[2] != '0' ) {
+            app_err_no = 20004;
+            strcpy( stat, "挂失");
+        } else {
+            strcpy( stat, "正常");
+        }
+    }
+
+    if( strlen(LoanAccStat) > 0 ) {
+
+        if( LoanAccStat[0] != '0' ) {
+            app_err_no = 99999;
+            strcpy( stat, "销户");
+        } else {
+            strcpy( stat, "正常");
+        }
+    }
+
+    if( strlen(CardAccStat) > 0 ) {
+
+        if( CardAccStat[0] != '0' ) {
+            app_err_no = 99999;
+            strcpy( stat, "销户");
+        } else if( CardAccStat[1] != '0' ) {
+            app_err_no = 99999;
+            strcpy( stat, "冻结");
+        } else if( CardAccStat[2] != '0' ) {
+            app_err_no = 20004;
+            strcpy( stat, "挂失");
+        } else {
+            strcpy( stat, "正常");
+        }
+    }
+
+    if( app_err_no == 20004 ) {
+        WriteLog( ERR_LVL, "ERR: 转出账户状态校验错误[%s]!", stat );
+        sprintf( err_code, "3%ld", app_err_no );
+        sprintf( err_msg, "转出卡或账号%s", stat );
+        PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, err_code, 0 );
+        PutPoolDataByName( "BUSIIB", "thsdesc",  0, 0, err_msg,  0 );
+        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, &app_err_no,  0 );
+        return( -1 );
+    }
+
+	return( 0 );
+}
+
+int
+BankAccountQry_DataProc()
+{
+	int		i = 0;
+	long    app_err_no = 0;
+	char	totalQnt[10+1];
+	char	acct[32+1];
+	char    err_code[6+1];
+	char    err_msg[256+1];
+EXEC SQL BEGIN DECLARE SECTION;
+	char	currencyTyp[6+1];
+	char	busitype[3+1];
+	char	incode[20+1];
+EXEC SQL END DECLARE SECTION;
+
+	memset( totalQnt, 0x00, sizeof(totalQnt) );
+	memset( acct, 0x00, sizeof(acct) );
+	memset( busitype, 0x00, sizeof(busitype) );
+	memset( err_code, 0x00, sizeof(err_code) );
+	memset( err_msg, 0x00, sizeof(err_msg) );
+
+	GetPoolDataByName( "PBSYS", "BusiType", 0, 0, busitype, 0 );
+	rtrim(busitype);
+
+    GetPoolDataByName( "BUSIIB", "acct", 0, 0, acct, 0 );
+    GetPoolDataByName( "BUSIIB", "totalQnt", 0, 0, totalQnt, 0 );
+	PutPoolDataByName( "RCBIB", "v", 0, 0, totalQnt, 0 );
+
+
+	for( i = 0; i < atoi(totalQnt); i++ ) 
+		PutPoolDataByName( "BUSIIB", "acct", i, 0, acct, 0 );
+
+	for( i = 0; i < atoi(totalQnt); i++ ) {
+		memset( incode, 0x00, sizeof(incode) );
+		memset( currencyTyp, 0x00, sizeof(currencyTyp) );
+		GetPoolDataByName( "BUSIIB", "currencyTyp", i, 0, currencyTyp, 0 );
+		rtrim(currencyTyp);
+        EXEC SQL SELECT incode INTO :incode
+            FROM t_pb_net_para
+            WHERE busitype = :busitype
+            AND paratype = "currencyTyp"
+            AND outcode = :currencyTyp;
+        if( SQLCODE != 0 && SQLCODE != 100 )
+        {
+            WriteLog( ERR_LVL, "查询网银系统参数对应表失败!SQLCODE[%d]busitype[%s]",\
+				 sqlca.sqlcode, busitype );
+            strcpy( err_code, "99999" );
+            strcpy( err_msg, "查询网银系统参数对应表失败!" );
+            PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, err_code, 0 );
+            PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+            return ( -1 );
+        }
+        else if( SQLCODE == 100 )
+        {
+            WriteLog( ERR_LVL, "网银系统参数对应表配置有误，请检查!busitype[%s]", busitype );
+			continue;
+        }
+
+		PutPoolDataByName( "BUSIIB", "currencyTyp", i, 0, incode, 0 );
+	}
+
+	PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "0", 0 );
+
+	return 0;
+}

@@ -1,0 +1,1733 @@
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <time.h>
+#include "pbconstval.h"
+#include "pbstructdef.h"
+#ifdef ORACLE_DATABASE
+EXEC SQL include "pbranchdb.h";
+#else
+#include "pbranchdb.h"
+#endif
+#include "pberrlog.h"
+#include "pbglbvardef.h"
+#include "pbbasefunc.h"
+#include "pbappdb.h"
+
+/*****************************************************
+**函数描述     : 小额农户贷款前处理
+**函数用途     : 组织打包数据
+**输入         ：
+**输出         :
+**创建日期     ：2013/08/06
+**最后修改日期 ：
+**Create by    : WO
+*****************************************************/
+
+long
+CstmLoanHelp_bef(char *para)
+{
+	char clearpwd[128+1],trancode[40+1];
+	char pwdbuf[128+1],sys_pwd[17];
+	char cardAccrNbbuf[32+1],use[101],loanAmt[17],repayDt[9],loanAcct[33];
+	char loanCtrctNb[33],repayIntrst[17],repayAmt[17],fee[17];
+	char err_code[10], err_msg[100],seqno[11],intrstRate[17],tmpamt[20];
+	float amt;
+	int ret=0;
+
+	memset(clearpwd, 0, sizeof(clearpwd));
+	memset(trancode, 0, sizeof(trancode));
+	memset(pwdbuf, 0, sizeof(pwdbuf));
+	memset(sys_pwd, 0, sizeof(sys_pwd));
+	memset(cardAccrNbbuf, 0, sizeof(cardAccrNbbuf));
+	memset(use, 0, sizeof(use));
+	memset(loanAmt, 0, sizeof(loanAmt));
+	memset(err_code, 0, sizeof(err_code));
+	memset(err_msg, 0, sizeof(err_msg));
+	memset(loanAcct, 0, sizeof(loanAcct));
+	memset(loanCtrctNb, 0, sizeof(loanCtrctNb));
+	memset(repayIntrst, 0, sizeof(repayIntrst));
+	memset(repayAmt, 0, sizeof(repayAmt));
+	memset(seqno, 0, sizeof(seqno));
+	memset(fee, 0, sizeof(fee));
+	memset(intrstRate, 0, sizeof(intrstRate));
+	memset(tmpamt, 0, sizeof(tmpamt));
+
+	GetPoolDataByName( "PBSYS", "SrcJourNo", 0, 0, seqno, 0);
+	rtrim( seqno );
+	PutPoolDataByName( "SMS2", "guid", 0, 0, seqno, 0);
+	GetPoolDataByName( "PBSYS", "RTranCode", 0, 0, trancode, 0 );
+	rtrim( trancode );
+	if( strncmp( trancode, "CBS1000950", 10 ) == 0 )
+	{
+		GetPoolDataByName("BUSIIB","acct",0,0,cardAccrNbbuf,0);
+		GetPoolDataByName("BUSIIB","pwd",0,0,pwdbuf,0);
+		GetPoolDataByName("BUSIIB","loanAmt",0,0,loanAmt,0);
+		GetPoolDataByName("BUSIIB","use",0,0,use,0);
+		GetPoolDataByName("BUSIIB","repayDt",0,0,repayDt,0);
+		GetPoolDataByName("BUSIIB","intrstRate",0,0,intrstRate,0);
+
+		PutPoolDataByName("SMS2","acctNo",0,0,cardAccrNbbuf,0);
+		PutPoolDataByName("SMS2","loanAmt",0,0,loanAmt,0);
+		PutPoolDataByName("SMS2","use",0,0,use,0);
+		PutPoolDataByName("SMS2","ctrctRepayDt",0,0,repayDt,0);
+		PutPoolDataByName("SMS2","instrt",0,0,intrstRate,0);
+		PutPoolDataByName("SMS2","tranCode",0,0,"2031",0);
+	}
+	if( strncmp( trancode, "CBS1000980", 10 ) == 0 )
+	{
+		GetPoolDataByName("BUSIIB","payCardAcctNb",0,0,cardAccrNbbuf,0);
+		GetPoolDataByName("BUSIIB","loanAcct",0,0,loanAcct,0);
+		GetPoolDataByName("BUSIIB","payNb",0,0,loanCtrctNb,0);
+		GetPoolDataByName("BUSIIB","repayIntrst",0,0,repayIntrst,0);
+		GetPoolDataByName("BUSIIB","repayAmt",0,0,repayAmt,0);
+		GetPoolDataByName("BUSIIB","fee",0,0,fee,0);
+		rtrim( cardAccrNbbuf );
+		rtrim( loanAcct );
+		rtrim( loanCtrctNb );
+		rtrim( repayIntrst );
+		rtrim( repayAmt );
+		rtrim( fee );
+		amt=atof(repayIntrst) + atof(repayAmt);
+		sprintf(tmpamt,"%.2f",amt);
+		PutPoolDataByName("BUSIIB","amt",0,0,tmpamt,0);
+
+		PutPoolDataByName("SMS2","acctNo",0,0,cardAccrNbbuf,0);
+		PutPoolDataByName("SMS2","loanNo",0,0,loanCtrctNb,0);
+		PutPoolDataByName("SMS2","repayAmt",0,0,repayAmt,0);
+		PutPoolDataByName("SMS2","loanAcct",0,0,loanAcct,0);
+		PutPoolDataByName("SMS2","instam",0,0,repayIntrst,0);
+		PutPoolDataByName("SMS2","chargeFee",0,0,fee,0);
+		PutPoolDataByName("SMS2","tranCode",0,0,"2032",0);
+	}
+
+
+/*
+	ret = UnionDecryptPin((char *)pwdbuf, (char *)cardAccrNbbuf,(char *)clearpwd);
+	if( ret != 0 )
+	{
+		WriteLog( ERR_LVL, "解密错误" );
+		strcpy( err_code, "99999" );
+		strcpy( err_msg, "解密错误");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, err_code, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	strcpy(clearpwd,"111111");
+	WriteLog(ERR_LVL,"PWD: %s\n",clearpwd);
+	if ( SC6000_ATM_3Des(1, (char *)clearpwd, (char *)sys_pwd))
+	{
+		WriteLog( ERR_LVL, "加密错误" );
+		strcpy( err_code, "99999" );
+		strcpy( err_msg, "加密错误");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, err_code, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	PutPoolDataByName("SMS2","tradePwd",0,0,sys_pwd,0);
+	*/
+
+	return 0;
+}
+
+/*****************************************************
+**函数描述     : 小额农户贷款处理
+**函数用途     : 打包,发送到电话银行贷款接口,解包
+**输入         ：
+**输出         :
+**创建日期     ：2013/08/06
+**最后修改日期 ：
+**Create by    : WO
+*****************************************************/
+
+long
+CstmLoanHelp(char *para)
+{
+	char trancode[40+1], param[100+1],err_code[10], err_msg[100];
+	char loanNo[15],loanBal[17],loanStat[2],tranDate[9];
+
+	memset( trancode, 0, sizeof(trancode) );
+	memset( param, 0, sizeof(param) );
+	memset( err_code, 0, sizeof(err_code) );
+	memset( err_msg, 0, sizeof(err_msg) );
+	memset( loanNo, 0, sizeof(loanNo) );
+	memset( loanBal, 0, sizeof(loanBal) );
+	memset( loanStat, 0, sizeof(loanStat) );
+	memset( tranDate, 0, sizeof(tranDate) );
+
+	GetPoolDataByName( "PBSYS", "RTranCode", 0, 0, trancode, 0 );
+	rtrim( trancode );
+	WriteLog( ERR_LVL, "交易码[%s]", trancode );
+	PayGetCoreDate( tranDate );
+
+	if( strncmp( trancode, "CBS1000950", 10 ) == 0 )
+	{
+		sprintf(param, "P|700|730020" );	
+	}
+	else if( strncmp( trancode, "CBS1000980", 10 ) == 0 )
+	{
+		sprintf(param, "P|700|730024" );	
+	}
+	else
+	{
+		WriteLog( ERR_LVL, "交易码错误" );
+		strcpy( err_code, "99999" );
+		strcpy( err_msg, "交易码错误");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, err_code, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	if( Data_Pack( param ) != 0 )
+	{
+		WriteLog( ERR_LVL, "短信平台打包失败" );
+		strcpy( err_code, "99999" );
+		strcpy( err_msg, "短信平台打包失败");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, err_code, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	MsgFlagHandleNew("700", 'S', "3");
+	Data_GetTraceCode("700");
+
+	if( Comm_AcCall( "700004|912348" ) != 0 )
+	{
+		WriteLog( ERR_LVL, "Comm_AcCall ERR" );
+		strcpy( err_code, "99999" );
+		strcpy( err_msg, "Comm_AcCall ERR");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, err_code, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	if( strncmp( trancode, "CBS1000950", 10 ) == 0 )
+	{
+		sprintf(param, "P|700|730022" );	
+	}
+	else if( strncmp( trancode, "CBS1000980", 10 ) == 0 )
+	{
+		sprintf(param, "P|700|730026" );	
+	}
+	else
+	{
+		WriteLog( ERR_LVL, "交易码错误" );
+		strcpy( err_code, "99999" );
+		strcpy( err_msg, "交易码错误");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, err_code, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	if(Data_Unpack( param ) != 0)
+	{
+		WriteLog( ERR_LVL, "Data_Unpack ERR" );
+		strcpy( err_code, "99999" );
+		strcpy( err_msg, "Data_Unpack ERR");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, err_code, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	GetPoolDataByName( "SMS2", "hostReturnCode", 0, 0, err_code, 0 );
+	GetPoolDataByName( "SMS2", "hostErrorMessage", 0, 0, err_msg, 0 );
+	if( strncmp( err_code, "000", 3) != 0 )
+	{
+		WriteLog( ERR_LVL, "电话银行 ERR" );
+		strcpy( err_code, "99999" );
+		strcpy( err_msg, "Data_Unpack ERR");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, err_code, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+	if( strncmp( trancode, "CBS1000950", 10 ) == 0 )
+	{
+		GetPoolDataByName("SMS2","loanNo",0,0,loanNo,0);
+		rtrim( loanNo );
+		GetPoolDataByName("SMS2","loanBal",0,0,loanBal,0);
+		rtrim( loanBal );
+		GetPoolDataByName("SMS2","loanStat",0,0,loanStat,0);
+		rtrim( loanStat );
+		PutPoolDataByName( "BUSIIB", "loanAcct", 0, 0, loanNo, 0 );
+		PutPoolDataByName( "BUSIIB", "payNb", 0, 0, loanNo, 0 );
+		PutPoolDataByName( "BUSIIB", "bal", 0, 0, loanBal, 0 );
+		PutPoolDataByName( "BUSIIB", "loanStat", 0, 0, loanStat, 0 );
+		PutPoolDataByName( "BUSIIB", "commitDt", 0, 0, tranDate, 0 );
+	}
+	if( strncmp( trancode, "CBS1000980", 10 ) == 0 )
+	{
+		memset( loanBal, 0, sizeof(loanBal));
+		GetPoolDataByName("SMS2","loanBal",0,0,loanBal,0);
+		rtrim( loanBal );
+		PutPoolDataByName( "BUSIIB", "bal", 0, 0, loanBal, 0 );
+		PutPoolDataByName( "BUSIIB", "tranDate", 0, 0, tranDate, 0 );
+	}
+	PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "0", 0 );
+	return 0;
+}
+/*****************************************************
+* Function     :CstmLoanOfSelfHelp
+* Description  :客户自助借款_2031
+* Input        ： 无
+* Output       : 无
+* Return       :  0 -- 成功
+                 -1 -- 失败
+*-----------------------------------------
+*Create        Date         Action
+* zhfei       2012/12/27    Create
+*****************************************************/
+int wyCstmLoanOfSelfHelp()
+{
+	EXEC SQL BEGIN DECLARE SECTION;
+    	double GuideLine = 0.00;
+    	char inst_no1[4+1];         /* 贷款机构 */
+    	char inst_no2[4+1];         /* 开卡机构 */
+    	char inst_no[4+1]; 
+		char pb_date[10+1];
+        char pb_seqno[10+1];
+		char   loan_acc[25+1];
+	EXEC SQL END DECLARE SECTION;
+    char PB_seqno[10+1];
+    char TT_seqno[10+1];
+    char TT_seqno1[10+1];
+    char TT_seqno2[10+1];
+    char TT_seqno3[10+1];
+    char amount[16+1];              /* 借款金额 */ 
+    long host_stat = 0; 
+    char err_msg[1024+1];
+    char contract_id[20+1];
+    double rmb_amt = 0.00;
+    char fee_flag[1+1];
+    char use[120+1];
+    char loan_duedate[8+1];
+    char bgn_date[8+1];
+    char loan_no[14+1];
+	char manager[11];
+    int ret = -1;
+    double loan_bal = 0.00;
+    double fr_rate = 0.00;
+    double rate = 0.00;
+    char   crate[16+1];
+	char cfration[16+1];
+	char cbal[16+1];
+	char due_dt1[8+1];
+	char due_dt2[8+1];
+	char due_dt3[8+1];
+	char cstm_pwd[16+1];
+	char clear_pwd[16+1];
+	char sys_pwd[16+1],tranDate[9];
+	long app_err_no=0;
+    struct msg
+    {
+    	char int_type[1+1];         /* 结息方式 */
+    	char begin_date[8+1];       /* 起息日 */
+    	char curAcctNo[32+1];        /* 贷款账号 */  
+    	char cstm_no[14+1];         /* 客户号 */
+    	char due_date[8+1];         /* 到期日 */
+    	double fration;          /* 正常浮到比率 */
+    	char use_type[30+1];        /* 用途 */
+    	char loan_type[1+1];        /* 贷款方式 */     
+    	double overdue_rata;        /* 逾期浮动比 */
+    	double embezzle_rata;       /* 挪用浮动比 */
+    	char   rate_tmp[10+1];            /* 逾期执行利率 */
+    	char rate_type[1+1];        /* 利率方式 */
+    	long num_n;                 /* 期数 */
+	} call_loan;
+	
+    memset(&call_loan,          0x00,   sizeof(call_loan));
+    memset(PB_seqno,            0x00,   sizeof(PB_seqno));
+    memset(TT_seqno,            0x00,   sizeof(TT_seqno));
+    memset(TT_seqno1,           0x00,   sizeof(TT_seqno1));
+    memset(TT_seqno2,           0x00,   sizeof(TT_seqno2));
+    memset(TT_seqno3,           0x00,   sizeof(TT_seqno3));
+    memset(err_msg,             0x00,   sizeof(err_msg));
+    memset(amount,              0x00,   sizeof(amount));
+    memset(inst_no,             0x00,   sizeof(inst_no));
+    memset(contract_id,         0x00,   sizeof(contract_id));
+    memset(inst_no1,            0x00,   sizeof(inst_no1));
+    memset(inst_no2,            0x00,   sizeof(inst_no2));
+    memset(fee_flag,            0x00,   sizeof(fee_flag));
+    memset(use,                 0x00,   sizeof(use));
+    memset(loan_duedate,        0x00,   sizeof(loan_duedate));
+    memset(bgn_date,            0x00,   sizeof(bgn_date));
+    memset(loan_no,             0x00,   sizeof(loan_no));
+    memset(loan_acc,            0x00,   sizeof(loan_acc));
+    memset(cfration,            0x00,   sizeof(cfration));
+    memset(cbal,                0x00,   sizeof(cbal));
+    memset(crate,               0x00,   sizeof(crate));
+    memset(due_dt1,             0x00,   sizeof( due_dt1 ));
+	memset(due_dt2,             0x00,   sizeof( due_dt2 ));
+	memset(due_dt3,             0x00,   sizeof( due_dt3 ));
+	memset(cstm_pwd,            0x00,   sizeof( cstm_pwd ));
+	memset(clear_pwd,           0x00,   sizeof( clear_pwd ));
+	memset(sys_pwd,             0x00,   sizeof( sys_pwd ));
+	memset( tranDate, 0, sizeof(tranDate) );
+	memset( manager, 0, sizeof(manager) );
+	memset( pb_date, 0, sizeof(pb_date) );
+	memset( pb_seqno, 0, sizeof(pb_seqno) );
+    
+    
+	/*取核心日期*/
+    PayGetCoreDate( pb_date);
+
+	/*取交易流水*/
+	GetPoolDataByName( "PBSYS", "SrcJourNo", 0, 0, pb_seqno, 0 );
+
+    /* 获取流水号信息 */
+    ret = get_PBseqno(PB_seqno);
+	if(ret != 0)
+	{
+		WriteLog(ERR_LVL,"ERROR: get_PBseqno: %s\n", PB_seqno);
+		return PB_ERR;
+	}
+    if ( (ret = get_TTseqno(TT_seqno)) != 0 )
+	{
+        WriteLog ( ERR_LVL, "取TT流水号出错");
+			app_err_no=99999;
+			strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理！");
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return( PB_ERR);
+    }
+    if ( get_TTseqno(TT_seqno1) != 0 )
+    {
+        WriteLog ( ERR_LVL, "取TT流水号出错");
+			app_err_no=99999;
+			strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理！");
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return( PB_ERR);;
+    }
+	if ( get_TTseqno(TT_seqno2) != 0 )
+    {
+        WriteLog ( ERR_LVL, "取TT流水号出错");
+			app_err_no=99999;
+			strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理！");
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return( PB_ERR);
+    }
+    if ( get_TTseqno(TT_seqno3) != 0 )
+    {
+        WriteLog ( ERR_LVL, "取TT流水号出错");
+			app_err_no=99999;
+			strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理！");
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return( PB_ERR);
+    }
+    
+    /******** 解包获取信息 ********/
+    GetPoolDataByName("BUSIIB", "acct", 0, 0, call_loan.curAcctNo, 0);  /* 转入账号 */
+    GetPoolDataByName("BUSIIB", "loanAmt", 0, 0, amount, 0);              /* 借款金额 */
+    GetPoolDataByName("BUSIIB", "repayDt", 0, 0, loan_duedate, 0);   /* 贷款到期日 */
+    GetPoolDataByName("BUSIIB", "intrstRate", 0, 0, crate, 0);                 /* 利率 */
+	rtrim( call_loan.curAcctNo );
+	rtrim( crate );
+    rate = atof(crate);
+    WriteLog(ERR_LVL, "rate=[%f]", rate);
+    WriteLog(ERR_LVL, "======= 获取利率成功 =========");
+    /* 贷款开始日期 */
+    ret = PayGetPbDate(bgn_date);
+    if (ret != 0)
+	{
+        WriteLog(ERR_LVL,"ERROR: PayGetPbDate: %s\n", bgn_date);
+			app_err_no=99999;
+			strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理！");
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return PB_ERR;
+	}
+	
+    /******** 转入账号检查以及获取贷款机构 ***********/
+	ret = get_acct_open_inst(call_loan.curAcctNo, inst_no);
+    if (ret != 0)
+    {
+        WriteLog(ERR_LVL, "账户状态不正常，无法进行交易");
+	strcpy(err_msg,"账户状态不正常，无法进行交易");
+	app_err_no=99999;
+	PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+	PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+	PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return PB_ERR;
+    }
+    
+    /*************** 一. 查询自助贷款合同记录 ***************/
+    PutPoolDataByName("LOAN",  "PrdNo",      0, 0, "4005", 0 );
+    PutPoolDataByName("LOAN",  "CstmManger", 0, 0, "2802", 0 );
+    PutPoolDataByName("LOAN",  "LoanAcc",    0, 0, call_loan.curAcctNo, 0 );
+    PutPoolDataByName("LOAN",  "InstNo",     0, 0, "9996", 0 );
+    PutPoolDataByName("LOAN", "CurrType", 0, 0, "01", 0);
+    PutPoolDataByName("LOAN", "DueDate", 0, 0, bgn_date, 0);
+    PutPoolDataByName("LOAN", "Date1", 0, 0, loan_duedate, 0);
+    /** 打包头 **/
+    PutPoolDataByName( "ABSHEAD", "_tx_code",    0, 0, "4440",   0 );
+    PutPoolDataByName( "ABSHEAD", "_tx_op_stat", 0, 0, "N",      0 );
+    PutPoolDataByName( "ABSHEAD", "chnl_no",     0, 0, "W",      0 );
+    PutPoolDataByName( "ABSHEAD", "_tlr_no",     0, 0, "888891",  0 );
+    PutPoolDataByName( "ABSHEAD", "organ_no",    0, 0, "9996", 0 );
+    PutPoolDataByName( "ABSHEAD", "_seq_no",     0, 0, TT_seqno, 0 );
+    PutPoolDataByName( "ABSHEAD", "list_seqno",  0, 0, PB_seqno, 0 );
+	PutPoolDataByName( "APSYS",   "HstSeqNo",    0, 0, "000000", 0 );
+     
+    WriteLog( APP_LVL, "=============FML打包===============" );
+    ret = Data_PackFml( "110|4440|0" );
+    if( ret != 0 ) 
+    {
+        WriteLog( ERR_LVL, "ERROR: FML打包错: %d\n", ret );
+        return PB_ERR;
+    }
+    if( Comm_AcCallFmlAndUnpack("110|LOAN2SVC|4440|1") != 0) 
+    {
+        WriteLog( ERR_LVL, "ERROR:FML通讯解包错" );
+			app_err_no=99999;
+			strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理！");
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return PB_ERR;
+    }
+    GetPoolDataByName( "ABSHEAD", "_host_stat", 0, 0, &host_stat, 0 );
+    if( host_stat != 0 ) 
+    {
+        GetPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+        if( host_stat == -1 ) 
+        {
+            WriteLog( ERR_LVL, "通讯超时:[%s]", err_msg );
+			app_err_no=99999;
+			strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理！");
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        }
+        else 
+        {
+        	GetPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+            WriteLog( ERR_LVL, "核心查询交易失败:[%s]", err_msg );
+            app_err_no=99999;
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        }
+        return PB_ERR;
+    }
+    WriteLog(ERR_LVL, "============ 接口4440核心合同查询成功 ===============");
+    
+    /* 检查贷款额度 */
+    GetPoolDataByName( "LOAN", "DlvGuideLine",  0, 0, (char*)&GuideLine, 0 );
+    WriteLog(ERR_LVL, "---GuideLine=[%f]", GuideLine);
+    if (atof(amount)-GuideLine > 0.001 )
+    {
+        WriteLog(ERR_LVL, "贷款额度超限");
+	app_err_no=99999;
+	strcpy(err_msg,"贷款额度超限");
+	PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+	PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+	PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return PB_ERR;
+    }
+	if( atof(amount) < 100 )
+	{
+		WriteLog(ERR_LVL, "放款金额必须大于等于100");
+		app_err_no=99999;
+		strcpy(err_msg,"放款金额必须大于等于100");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return -1;
+	}
+    /* 结息方式 */
+    GetPoolDataByName( "LOAN", "flag1",  0, 0, call_loan.int_type, 0 );
+    /* 起息日 */
+    GetPoolDataByName( "LOAN", "BgnIntDate",  0, 0, call_loan.begin_date, 0 );
+    /* 客户号 */
+    GetPoolDataByName( "LOAN", "CstmNo",  0, 0, call_loan.cstm_no, 0 );
+    /* 到期日 */
+    GetPoolDataByName( "LOAN", "DueDate",  0, 0, call_loan.due_date, 0 );
+/*
+    if (atol(loan_duedate) > atol(call_loan.due_date))
+    {
+        WriteLog(ERR_LVL, "贷款日期大于合同签约日期");
+	strcpy(err_msg,"贷款日期大于合同签约日期");
+	app_err_no=99999;
+	PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+	PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+	PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return PB_ERR;    
+    }
+*/
+    /* 浮到比率 */
+    GetPoolDataByName( "LOAN", "Fratio_n",  0, 0, &call_loan.fration, 0 );
+    WriteLog(ERR_LVL, "444orate=[%f]", call_loan.fration);
+    /* 贷款机构号 */
+    GetPoolDataByName( "LOAN", "LoanInst",  0, 0, inst_no1, 0 );
+	strcpy(manager,inst_no1);
+	strcat(manager,"99");
+	/* 受理机构号 */
+	PutPoolDataByName( "ABSHEAD", "organ_no",    0, 0, inst_no1, 0 );
+	/*柜员 */
+	PutPoolDataByName( "LOAN", "CstmManger",  0, 0, manager, 0 );
+
+	rtrim(manager);
+	PutPoolDataByName( "ABSHEAD", "_tlr_no",     0, 0, manager,  0 );
+    /* 贷款用途 */
+    GetPoolDataByName( "LOAN", "UseType",  0, 0, call_loan.use_type, 0 );
+    /* 贷款方式 */
+    GetPoolDataByName( "LOAN", "LoanType",  0, 0, call_loan.loan_type, 0 );
+    /* 逾期浮到比 */
+    GetPoolDataByName( "LOAN", "OverdueRate",  0, 0, (char*)&(call_loan.overdue_rata), 0 );
+    /* 逾期执行利率 */
+    GetPoolDataByName( "LOAN", "RefNum",  0, 0, call_loan.rate_tmp, 0 );
+    fr_rate = atof(call_loan.rate_tmp);
+    WriteLog(ERR_LVL, "rate_overrate=[%f]", fr_rate);
+    /* 贷款利率方式 */
+    GetPoolDataByName( "LOAN", "flag3",  0, 0, call_loan.rate_type, 0 );
+    /* 合同流水号 */
+    GetPoolDataByName( "LOAN", "StAcc",  0, 0, contract_id, 0 );
+  
+    
+    /***************** 2.手续费处理 *****************/
+    /* 计算手续费标志fee_flag: 0-不收 
+                                1-收客户 
+                                2-收机构 
+                                3-收客户和机构 */
+    /****************** 手续费处理结束 ******************/
+    
+    
+    /********* 三、调用核心接口0401生成借据 ***************/
+	PutPoolDataByName("ABSHEAD", "_tx_code", 0, 0, "0401",0);
+	PutPoolDataByName("ABSHEAD", "_seq_no", 0, 0, TT_seqno1,0);
+	/* 1.结息方式 */
+	PutPoolDataByName("LOAN", "flag10", 0, 0, call_loan.int_type, 0);
+	/* 2.起息日 */
+	PutPoolDataByName("LOAN", "BgnIntDate", 0, 0, bgn_date, 0);
+	/* 3.现转标志  */
+ 	PutPoolDataByName("LOAN", "CshTsfFlag", 0, 0, "1", 0);
+ 	/* 4.客户号 */
+    PutPoolDataByName("LOAN", "CstmNo", 0, 0, call_loan.cstm_no, 0);
+    /* 5.币种 */
+    PutPoolDataByName("LOAN", "CurrType", 0, 0, "01", 0);
+    /* 6.发放指标 */
+    GuideLine = atof(amount);
+    WriteLog(ERR_LVL, "amot=[%f]", GuideLine);
+    PutPoolDataByName("LOAN", "DlvGuideLine", 0, 0, (char*)&GuideLine, 0);
+    /* 7.到期日 */
+    PutPoolDataByName("LOAN", "DueDate", 0, 0, loan_duedate, 0);
+    /* 8.正常浮到比 */
+    PutPoolDataByName("LOAN", "Fratio_n", 0, 0, (char*)&call_loan.fration, 0);
+    /* 9.贷款机构号 */
+    PutPoolDataByName("LOAN", "LoanInst", 0, 0, inst_no1, 0);
+    /* 10.贷款分类 */
+    PutPoolDataByName("LOAN", "flag3", 0, 0, "0", 0);
+    /* 11.客户经理 */
+    PutPoolDataByName("LOAN", "CstmManger", 0, 0, manager, 0);
+    /* 12.用途 */
+    PutPoolDataByName("LOAN", "UseType", 0, 0, call_loan.use_type, 0);
+    /* 13.贷款方式 */
+    PutPoolDataByName("LOAN", "LoanType", 0, 0, call_loan.loan_type, 0);
+    /* 14.逾期浮动比 */
+    WriteLog(ERR_LVL, "over_fratio=[%f]", call_loan.overdue_rata);
+    PutPoolDataByName("LOAN", "OverdueFratio", 0, 0, (char *)&call_loan.overdue_rata, 0);
+    /* 15.逾期执行利率 */
+    PutPoolDataByName("LOAN", "rate1", 0, 0, (char *)&fr_rate, 0);
+    /* 16.扣息账号 */
+    PutPoolDataByName("LOAN", "IntAcc", 0, 0, call_loan.curAcctNo, 0);
+    /* 17.贷款产品码 */
+    PutPoolDataByName("LOAN", "PrdNo", 0, 0, "4005", 0);
+    /* 18.计收复息 */
+    trim(call_loan.int_type);
+    if(call_loan.int_type[0] == '0')
+	{
+	  PutPoolDataByName("LOAN", "flag11", 0, 0, "0", 0);
+	}
+	else
+	{
+	  PutPoolDataByName("LOAN", "flag11", 0, 0, "1", 0);
+	}
+    /* 19.贷款执行利率 */
+    PutPoolDataByName("LOAN", "rate", 0, 0, (char*)&rate, 0);
+    WriteLog(ERR_LVL, "call_rate[%f]", rate);
+    /* 20.合同流水号 */
+    PutPoolDataByName("LOAN", "Consultation", 0, 0, contract_id, 0);
+    /* 21.贷款利率方式 */
+    trim(call_loan.rate_type);
+    if(call_loan.rate_type[0] == '0') call_loan.rate_type[0] = '1';
+	if(call_loan.rate_type[0] == '1') call_loan.rate_type[0] = '0';
+    PutPoolDataByName("LOAN", "flag1", 0, 0, call_loan.rate_type, 0);
+    WriteLog(ERR_LVL, "rate_type[%s]", call_loan.rate_type);
+    /* 22.期数 */
+    call_loan.num_n = 1;
+	PutPoolDataByName("LOAN", "Num_n", 0, 0, (char*)&(call_loan.num_n), 0); 
+	
+	WriteLog(TEST_LVL,"================= 核心0401接口FML打包 ==================");
+	ret = Data_PackFml("110|0401|0");
+	if (ret != 0)
+	{
+		WriteLog(ERR_LVL,"核心0401接口FML打包: %d\n",ret);
+		return PB_ERR;
+	}
+	WriteLog(TEST_LVL, "=============与核心通讯===============");
+	ret = Comm_AcCallFmlAndUnpack("110|LOANSVC|0401|1");
+	if (ret != 0)
+	{
+	    WriteLog( ERR_LVL, "ERROR:FML0401通讯解包错" );
+			app_err_no=99999;
+			strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理！");
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return PB_ERR;
+	}
+	
+	GetPoolDataByName("ABSHEAD","_host_stat",0,0,&host_stat,0);
+	if(host_stat == 0)
+	{
+		GetPoolDataByName("LOAN", "LoanNo", 0, 0,loan_no , 0);
+		WriteLog(APP_LVL,"生成借据号:[%s]",loan_no);
+	}
+	else
+	{
+		if(host_stat == -1)
+		{
+			WriteLog(ERR_LVL,"与核心通讯超时:[%s]", err_msg);
+			app_err_no=99999;
+			strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理！");
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		}
+		else
+		{
+			GetPoolDataByName("ABSHEAD","_error_code",0,0, err_msg, 0);
+			WriteLog( ERR_LVL, "查询失败:[%s]", err_msg );
+			app_err_no=99999;
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+			WriteLog( ERR_LVL, "主机返回:[%d]", host_stat);
+		}
+		return (PB_ERR);
+	}
+	WriteLog(ERR_LVL, "========== 调用核心0401接口生成借据成功 ===========");
+	
+	/*登记机构及手续费信息*/
+    EXEC SQL UPDATE t_pb_net_dtl
+        SET payinstno = :inst_no1,
+            rcvinstno = :inst_no,
+            accinstno = :inst_no1,
+            payacc =:loan_acc,
+            transamt = :GuideLine
+        WHERE trandate = :pb_date
+        AND seqno = :pb_seqno;
+	if( sqlca.sqlcode || sqlca.sqlerrd[2] != 1)
+	{
+        WriteLog( ERR_LVL, "更新数据库失败[%d][%d]: pb_date[%s]pb_seqno[%s]", sqlca.sqlcode, sqlca.sqlerrd[2], pb_date, pb_seqno);
+        app_err_no=99999;
+			strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理！");
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+      return (PB_ERR);
+	}
+	
+	/***************** 四、调用核心4435接口放款 ****************/
+	PutPoolDataByName( "ABSHEAD", "organ_no",    0, 0, inst_no1, 0 );
+	PutPoolDataByName("ABSHEAD", "_seq_no", 0, 0, TT_seqno2,0);
+	PutPoolDataByName("ABSHEAD","_tx_code",0,0,"4435",0);
+	/* 1.发放金额 */
+	WriteLog(ERR_LVL, "tran4435_amt=[%f]", GuideLine);
+	PutPoolDataByName("LOAN", "DlvGuideLine", 0, 0, (char*)&GuideLine, 0);
+	/* 2.现转标志 */
+	PutPoolDataByName("LOAN", "flag3", 0, 0, "1", 0);
+	/* 3.到期日 */
+	PutPoolDataByName("LOAN", "Date", 0, 0, loan_duedate, 0);
+	/* 4.发放标志 */
+	PutPoolDataByName("LOAN", "flag1", 0, 0, "1", 0);
+	/* 5.借贷标志 */
+	PutPoolDataByName("LOAN", "flag4", 0, 0, "1", 0);
+	/* 6.借据号 */
+    PutPoolDataByName("LOAN", "LoanNo", 0, 0, loan_no, 0);
+    /* 7.逾期执行利率 */
+    PutPoolDataByName("LOAN", "OverdueRate", 0, 0, (char *)&fr_rate, 0);
+    /* 8.关联账号 */
+    PutPoolDataByName("LOAN", "IntAcc", 0, 0, call_loan.curAcctNo, 0);
+    /* 9.产品码 */
+    PutPoolDataByName("LOAN", "PrdNo", 0, 0, "4005", 0);
+    /* 10.计收复息 */
+    if(call_loan.int_type[0] == '0')
+	{
+	    PutPoolDataByName("LOAN", "flag2", 0, 0, "0", 0);
+	}
+	else
+	{
+		PutPoolDataByName("LOAN", "flag2", 0, 0, "1", 0);
+	}
+    /* 11.贷款执行利率 */
+    PutPoolDataByName("LOAN", "rate", 0, 0, (char*)&rate, 0);
+    /* 12.期数 */
+    PutPoolDataByName("LOAN", "Num_n", 0, 0, (char*)&(call_loan.num_n), 0);
+    
+	WriteLog(TEST_LVL, "=============FML打包===============");
+	ret=Data_PackFml("110|4435|0");
+	if (ret != 0)
+	{
+		WriteLog(ERR_LVL,"ERROR: FML打包错: %d\n", ret);
+		app_err_no=99999;
+		strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理！");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return (PB_ERR);
+	}
+	WriteLog(TEST_LVL, "=============与核心通讯===============");
+	ret = Comm_AcCallFmlAndUnpack("110|LOANSVC|4435|1");
+	if (ret != 0)
+	{
+	    WriteLog( ERR_LVL, "ERROR:FML4435通讯解包错" );
+		app_err_no=99999;
+		strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理！");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return PB_ERR;
+	}
+	
+	GetPoolDataByName( "ABSHEAD", "_host_stat", 0, 0, &host_stat, 0 );
+	if( host_stat == 0 )
+	{
+		GetPoolDataByName("LOAN","amt",0,0,&loan_bal,0);
+        GetPoolDataByName("LOAN","LoanAcc",0,0,loan_acc,0);
+	}
+	else
+	{
+		GetPoolDataByName("ABSHEAD", "_error_code", 0, 0, err_msg,0 );
+		WriteLog( ERR_LVL, "999:[%d]", host_stat );
+		if( host_stat == -1 )
+		{
+			WriteLog( ERR_LVL, "通讯超时:[%s],TT_seqno2[%s]", err_msg, TT_seqno2 );
+			strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理！");
+			ret = wycardloan_ins_revjnl(TT_seqno2, bgn_date);
+		    if(ret != 0)
+		    {
+		        WriteLog(ERR_LVL,"Call CardLoan_InsRevJnl err: %d\n", ret);
+		        memset( err_msg, 0x00, sizeof(err_msg) );
+		        strcpy(err_msg,"冲正失败，联系客服处理！");
+		    }
+			app_err_no=99999;
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		}
+		else
+		{
+			WriteLog( ERR_LVL, "放款失败:[%s][%ld]", err_msg, host_stat);
+			app_err_no=99999;
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+    		ret = wyDel_Loaniou();
+    		if (ret != 0)
+    		{
+    		    WriteLog(ERR_LVL, "撤销借据失败");
+    		    memset( err_msg, 0x00, sizeof(err_msg) );
+    		    strcpy(err_msg,"撤销借据失败，联系客服处理！");
+    		    PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+    		    return PB_ERR;
+    		}
+    	}
+		return (PB_ERR);
+	}
+	WriteLog( APP_LVL, "================ 放款成功 ===============");
+    
+    /******************* 五、打包返回数据 ********************/
+    /* 贷款余额 */
+    GetPoolDataByName("LOAN", "amt", 0, 0, (char*)&loan_bal, 0);
+    /*loan_bal = Dround(loan_bal, 2);*/
+    sprintf(cbal, "%-0.2f", loan_bal);
+    WriteLog(ERR_LVL, "wwwwwwwwwwwwww【%s】", cbal);
+    PutPoolDataByName( "BUSIIB", "bal", 0, 0, cbal, 0);
+    /* 贷款种类 */
+    PutPoolDataByName("BUSIIB", "loanStat", 0, 0, call_loan.loan_type, 0);
+    /* 借据号 */
+    PutPoolDataByName("BUSIIB", "payNb", 0, 0, loan_no, 0);
+	PayGetCoreDate( tranDate );
+	PutPoolDataByName( "BUSIIB", "commitDt", 0, 0, tranDate, 0 );
+    
+    /* 贷款内账号 */
+    PutPoolDataByName("BUSIIB", "loanAcct", 0, 0, loan_acc, 0);
+    WriteLog(ERR_LVL, "放款成功贷款内部账号账号【%s】", loan_acc);
+	PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "0", 0 );
+
+	return PB_OK;
+}
+/*
+*desc   :自助贷款还款 手续费冲正和 改柜员流水表，业务流水表状态为失败
+*input  :
+*   seqno --需冲正的流水号 
+*return : 0 --成功  -1 -- 失败
+*/
+int wycardloan_ins_revjnl(seqno, tran_date)
+    EXEC SQL BEGIN DECLARE SECTION;
+    char *seqno;
+    char *tran_date;
+    EXEC SQL END DECLARE SECTION;
+{
+	int ret = -1;
+   
+	
+    WriteLog(ERR_LVL, " 冲正开始.......");
+    EXEC SQL BEGIN WORK;
+    if( sqlca.sqlcode )
+    {
+         WriteLog( ERR_LVL, "启动事务失败" );
+         return PB_ERR ;
+    }
+    
+    /* 冲正时，登记的流水号应该是原流水的　*/
+    PutPoolDataByName( "ABSHEAD", "_seq_no", 0, 0, seqno, 0 );
+    ret = PayInsertReverse();
+    if( ret != 0 )
+    {
+        WriteLog( ERR_LVL, "登记冲账流水失败" );
+        EXEC SQL ROLLBACK WORK;
+        return( PB_ERR );
+    }
+    EXEC SQL COMMIT WORK;
+    if( sqlca.sqlcode )
+    {
+        WriteLog( ERR_LVL, "提交事务失败" );
+        return( PB_ERR );
+    }
+    
+    return PB_OK;
+}
+/****************************
+	*放款失败删除该条借据记录
+*****************************/
+int wyDel_Loaniou()
+{
+	char    err_msg[50+1];
+	long    ret = -1;
+	long    hoststat = -1;
+	long    rellen=0;
+	char    c_loanno[15];
+	char    PB_seqno[10+1];
+	char    state_code[4+1];
+	
+
+	memset(err_msg,    0x00, sizeof(err_msg));
+	memset(c_loanno,   0x00, sizeof(c_loanno));
+	memset(PB_seqno,   0x00, sizeof(PB_seqno));
+	memset(state_code, 0x00, sizeof(state_code));
+	
+	/* 获取流水号信息 */
+    ret = get_TTseqno(PB_seqno);
+	if(ret != 0)
+	{
+		WriteLog(ERR_LVL,"ERROR: get_PBseqno: %s\n", PB_seqno);
+		return PB_ERR;
+	}
+	
+	GetPoolDataByName("ABSHEAD", "_error_code", 0, 0, err_msg,0 );
+	GetPoolDataByName("LOAN", "LoanNo", 0, 0, c_loanno, 0);
+	WriteLog(TEST_LVL, "借据号[%s]", c_loanno);
+	PutPoolDataByName("ABSHEAD", "_tx_code", 0, 0, "4422",0);
+	PutPoolDataByName("ABSHEAD", "_seq_no", 0, 0, PB_seqno,0);
+	PutPoolDataByName("ABSHEAD", "_error_code", 0, 0, "000000",0);
+	ret=Data_PackFml("110|4422|0");
+	if (ret != 0)
+	{
+		WriteLog(ERR_LVL,"ERROR: FML打包错: %d\n", ret);
+		return PB_ERR;
+	}
+	ret = Comm_AcCallFmlAndUnpack("110|LOAN2SVC|4422|1");
+	if (ret != 0)
+	{
+	    WriteLog( ERR_LVL, "ERROR:FML4422通讯解包错" );
+        return PB_ERR;
+	}
+	GetPoolDataByName( "ABSHEAD", "_host_stat", 0, 0, &hoststat, 0 );
+	WriteLog( TEST_LVL, "返回值:[%d]", hoststat );
+	if( hoststat == 0 )
+	{
+		PutPoolDataByName("ABSHEAD", "_error_code", 0, 0, err_msg,0 );
+		WriteLog( TEST_LVL, "撤消借据成功" );
+	}
+	else
+	{
+	    GetPoolDataByName("ABSHEAD", "_error_code", 0, 0, err_msg,0 );
+	    GetPoolDataByName("LOAN", "StatCode", 0, 0, state_code, 0 );
+	    WriteLog(ERR_LVL, "撤消借据返回code[%s]", state_code);
+		if( hoststat == -1 )
+		{
+			WriteLog( ERR_LVL, "通讯超时,请稍后再操作");
+		}
+		else
+		{
+			WriteLog( ERR_LVL, "撤消借据失败:[%s]", err_msg );
+		}
+		return (PB_ERR);
+	}
+	WriteLog(ERR_LVL, "================== 撤销借据成功 ================");
+    return PB_OK; 
+}
+/********************************************
+ * Function    : loan_cstm_self_rep()
+ * desc        : (贷款)客户自助还款 交易码 2032
+ * Input       : 无
+ * Output      : 无
+ * Return      : 0  -- 成功
+ *             : -1 -- 失败
+ * -------------------------------------
+ * Create             Date        Action
+ * wg               2012/12/27    Created.
+*/
+int wyloan_cstm_self_rep()
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+    struct s_pb_tlrlog pb_tlrlog;
+    char item_no[250+1];
+    char loan_acc[32+1];   /*贷款账号*/
+    char card_no[32+1];    /*还款账号*/
+    double tran_amt = 0.00;   /*还款金额*/
+    double rb_int = 0.00;     /*欠息总额*/
+    double chargef = 0.00;
+    char pb_seqno[10+1];
+	char pb_date[10+1];
+    char loan_inst[4+1];     /*贷款机构*/ 
+    char open_inst[4+1];     /*开户机构*/ 
+    char loan_no[40+1];    /*放款编号*/
+    EXEC SQL END DECLARE SECTION;
+    int ret = -1;
+    long hoststat = -1;
+    char res_code[2+1];
+    char err_msg[60+1];
+    char databuf[60+1];
+    char paper_typ[4+1];   /*证件类型*/
+    char paper_no[32+1];   /*证件号码*/
+    char contract_no[40+1];/*合 同 号*/
+    char rep_typ[1+1];     /*还款类型*/
+    char amt_c[30+1];
+    char tt_seqno1[10+1];
+    char tt_seqno2[10+1];
+    char tt_seqno3[10+1];
+    char tt_seqno4[10+1];
+    char tmp_seqno[10+1];
+    char sqlstr[512];
+    char fml_svr[60+1];
+    char int_type[1+1];      /*结息方式*/
+    long sendlen =0, recvlen = 0;
+    double bal = .0f;        /*贷款余额*/
+    char loan_type[2];          /*贷款方式*/
+    char from_date[10+1];
+    char to_date[10+1];
+    double interest_rate = .0f;
+    char prov_date[10+1];    /*放款日期*/
+    double rate_amt =.0f;
+    double rate_amt1 =.0f;
+    double lg_amt = 2.0f;
+    double famt  = .0f; 
+    double amt  = .0f;   /*实收本金*/
+    double intr = .0f;   /*实收利息*/
+    int fee_flag = 0;        /*手续费收取标识 1--收客户手续费 2--收机构手续费 3--收客户和机构手续费*/
+    char charge_fee[17];
+    long summ_no;
+    long inst_dist;
+    char dist_flag[10+1];    /*跨度标识*/
+    char inn_acc[25+1];
+    char tran_date[10+1];
+    char cstm_pwd[16+1];
+	char clear_pwd[16+1];
+	char sys_pwd[16+1];
+	long host_stat =0;
+	char err_code[100],tmpamt[20],tranDate[9];
+	char inst_no1[5],manager[10];
+	long app_err_no=0;
+
+    memset(err_code,   0,  sizeof(err_code));
+    memset(charge_fee, 0, sizeof(charge_fee)); 
+    memset(&pb_tlrlog, 0, sizeof(pb_tlrlog));   
+    memset(item_no, 0, sizeof(item_no)); 
+    memset(res_code, 0, sizeof(res_code));   
+    memset(err_msg, 0, sizeof(err_msg));
+    memset(databuf, 0, sizeof(databuf));
+    memset(paper_typ, 0, sizeof(paper_typ));
+    memset(paper_no, 0, sizeof(paper_no));
+    memset(contract_no, 0, sizeof(contract_no));
+    memset(loan_no, 0, sizeof(loan_no));
+    memset(loan_acc, 0, sizeof(loan_acc));
+    memset(card_no, 0, sizeof(card_no));
+    memset(rep_typ, 0, sizeof(rep_typ));
+    memset(amt_c, 0, sizeof(amt_c));
+    memset(tt_seqno1, 0, sizeof(tt_seqno1));
+    memset(tt_seqno2, 0, sizeof(tt_seqno2));
+    memset(tt_seqno3, 0, sizeof(tt_seqno3));
+    memset(tt_seqno4, 0, sizeof(tt_seqno4));
+    memset(pb_seqno, 0, sizeof(pb_seqno));
+    memset(tmp_seqno, 0, sizeof(tmp_seqno));
+    memset(sqlstr, 0, sizeof(sqlstr));
+    memset(fml_svr, 0, sizeof(fml_svr));
+    memset(int_type, 0, sizeof(int_type));
+    memset(loan_type, 0, sizeof(loan_type));
+    memset(from_date, 0, sizeof(from_date));
+    memset(to_date, 0, sizeof(to_date));
+    memset(prov_date, 0, sizeof(prov_date));
+    memset(loan_inst, 0, sizeof(loan_inst));
+    memset(open_inst, 0, sizeof(open_inst));
+    memset(dist_flag, 0, sizeof(dist_flag));
+    memset(inn_acc, 0, sizeof(inn_acc));
+    memset(tran_date, 0, sizeof(tran_date));
+    memset(cstm_pwd,            0x00,   sizeof( cstm_pwd ));
+	memset(clear_pwd,           0x00,   sizeof( clear_pwd ));
+	memset(sys_pwd,             0x00,   sizeof( sys_pwd ));
+	memset(tmpamt, 0, sizeof(tmpamt));
+	memset(tranDate, 0, sizeof(tranDate));
+	memset(inst_no1, 0, sizeof(inst_no1));
+	memset(manager, 0, sizeof(manager));
+
+    GetPoolDataByName("BUSIIB", "payCardAcctNb", 0, 0, card_no, 0);
+    GetPoolDataByName("BUSIIB", "payNb", 0, 0, loan_no, 0);
+    GetPoolDataByName("BUSIIB", "loanAcct", 0, 0, loan_acc, 0);
+    GetPoolDataByName("BUSIIB", "repayAmt", 0, 0, amt_c, 0);
+    GetPoolDataByName("BUSIIB", "repayIntrst", 0, 0, databuf, 0);
+    GetPoolDataByName("BUSIIB", "fee", 0, 0, charge_fee, 0);
+    chargef = atof(charge_fee);
+    tran_amt = atof(amt_c);
+    rb_int = atof(databuf);
+    trim(card_no);
+    trim(loan_no);
+    trim(amt_c);
+	famt=atof(amt_c) + atof(databuf);
+	sprintf(tmpamt,"%.2f",famt);
+	PutPoolDataByName("BUSIIB","amt",0,0,tmpamt,0);
+	PayGetCoreDate( tranDate );
+	PutPoolDataByName("BUSIIB","tranDate",0,0,tranDate,0);
+    
+    /*检查输入参数*/
+    if (strcmp(card_no, "") == 0)
+    {
+        WriteLog(ERR_LVL, "还款卡号/账号不能为空");
+		strcpy(err_msg,"还款卡号/账号不能为空");
+		app_err_no=99999;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return PB_ERR;
+    }
+	ret = IsCardNo( card_no );
+	if(ret != 0)
+	{
+		WriteLog(ERR_LVL, "手机银行不支持存折账户还款操作");
+		strcpy(err_msg,"手机银行不支持存折账户还款操作");
+		app_err_no=99999;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return PB_ERR;
+	}
+    
+    if (strcmp(loan_no, "") == 0)
+    {
+        WriteLog(ERR_LVL, "借据号不能为空");
+		strcpy(err_msg,"借据号不能为空");
+		app_err_no=99999;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return PB_ERR;
+    }
+    if (strcmp(amt_c, "")==0 || tran_amt < 0.001)
+    {
+        WriteLog(ERR_LVL, "还款金额不能为0");
+		strcpy(err_msg,"还款金额不能为0");
+		app_err_no=99999;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return PB_ERR;
+    }        
+    
+    ret = get_acct_open_inst(card_no, open_inst);
+    if (ret)
+    {
+        snprintf(err_msg, 60, "取卡[%s]的开户机构失败", card_no);
+		WriteLog(ERR_LVL, err_msg);
+		app_err_no=99999;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return (PB_ERR);    
+    }    
+     
+    if ((ret = get_TTseqno( tt_seqno1 )) != 0)
+	{
+        WriteLog(ERR_LVL, "取TT流水号出错");
+		strcpy(err_msg,"还款金额不能为0");
+		app_err_no=99999;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return( PB_ERR);
+    }   
+    
+    if (get_TTseqno(tt_seqno2))
+	{
+	    WriteLog(ERR_LVL, "生成PB流水失败");
+		strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理");
+		app_err_no=99999;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+	    return PB_ERR;
+	}
+    
+    if ((ret = get_TTseqno(tt_seqno3)) != 0)
+	{
+        WriteLog(ERR_LVL, "取TT流水号出错");
+		strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理");
+		app_err_no=99999;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return( PB_ERR);
+    }
+    
+    if ((ret = get_TTseqno(tt_seqno4)) != 0)
+	{
+        WriteLog(ERR_LVL, "取TT流水号出错");
+		strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理");
+		app_err_no=99999;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return( PB_ERR);
+    }
+
+	if ((ret = get_PBseqno( pb_seqno )) != 0)
+	{
+        WriteLog ( ERR_LVL, "取PB流水号出错");
+		strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理");
+		app_err_no=99999;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return( PB_ERR);
+	}
+	
+	if (ret = PayGetPbDate(tran_date))
+	{
+	    WriteLog(ERR_LVL, "取PB日期失败");
+		strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理");
+		app_err_no=99999;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+	    return PB_ERR;
+	}
+
+    /* Modified by MSJ 20131207 - Start */
+    /**************** 查询合同 ****************
+    PutPoolDataByName( "ABSHEAD", "_tx_code",    0, 0, "4440",   0 );
+    PutPoolDataByName( "ABSHEAD", "_tx_op_stat", 0, 0, "N",      0 );
+    PutPoolDataByName( "ABSHEAD", "chnl_no",     0, 0, "t",      0 );
+    PutPoolDataByName( "ABSHEAD", "_tlr_no",     0, 0, "888891", 0 );
+    PutPoolDataByName( "ABSHEAD", "organ_no",    0, 0, open_inst, 0 );
+    PutPoolDataByName( "ABSHEAD", "_seq_no",     0, 0, tt_seqno1, 0 );
+    PutPoolDataByName( "ABSHEAD", "list_seqno",  0, 0, pb_seqno, 0 );
+	PutPoolDataByName( "APSYS",   "HstSeqNo",    0, 0, "000000", 0 );
+    PutPoolDataByName( "LOAN",  "LoanNo",    0, 0, loan_no, 0 );
+    PutPoolDataByName( "LOAN",  "LoanAcc",   0, 0, card_no, 0 );
+	PutPoolDataByName( "LOAN",  "CstmManger",  0, 0, "2802", 0 ); 
+	PutPoolDataByName( "LOAN",  "PrdNo",   0, 0, "4005", 0 );
+	
+	WriteLog( APP_LVL, "=============FML打包===============" );
+    ret = Data_PackFml("110|4440|0");
+    if (ret != 0)
+    {
+        WriteLog( ERR_LVL, "ERROR: FML打包错: %d\n", ret );
+		strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理");
+		app_err_no=99999;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return -1;
+    }
+    if (Comm_AcCallFmlAndUnpack("110|LOANSVC|4440|1") != 0)
+    {
+        WriteLog( ERR_LVL, "ERROR:FML通讯解包错" );
+		strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理");
+		app_err_no=99999;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return -1;
+    }
+    
+    GetPoolDataByName("ABSHEAD", "_host_stat", 0, 0, &hoststat, 0);
+    if (hoststat != 0)
+    {
+		trim(res_code);
+        if (hoststat == -1)
+        {
+            WriteLog( ERR_LVL, "通讯超时:%s", err_msg );
+            strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理");
+            app_err_no=99999;
+            PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+            PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+            PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        }
+        else 
+        {
+            WriteLog( ERR_LVL, "交易失败:%s", err_msg );
+            GetPoolDataByName("ABSHEAD", "_error_code", 0, 0, err_msg, 0);
+		app_err_no=99999;
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        }
+        return (PB_ERR);
+    }
+    ***/
+    
+    /**取贷款机构**/
+    memset(sqlstr,0,sizeof(sqlstr));
+    sprintf ( sqlstr,"select loan_inst  from t_loan_iou where loan_no = '%s'",loan_no);
+    WriteLog(APP_LVL,"loan_no[%s]\n",loan_no );
+    WriteLog(APP_LVL,"sqlstr[%s]\n", sqlstr );
+    ret = PqQry("9996", loan_inst, sqlstr);
+    if(ret)
+    {
+        WriteLog ( ERR_LVL, "查询t_loan_iou错ret[%d]\n",ret);
+        app_err_no=99999;
+        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, "查询t_loan_iou错", 0 );
+        return (-1);
+    }
+    WriteLog(APP_LVL, "贷款机构:%s", loan_inst);
+    PutPoolDataByName("LOAN", "LoanInst", 0, 0, loan_inst, 0);
+    /* Modified by MSJ 20131207 - Start */
+    
+    WriteLog(DEBUG_LVL, "贷款机构:%s", loan_inst);
+    GetPoolDataByName("LOAN", "flag1", 0, 0, int_type, 0);      /*结息方式*/
+    WriteLog(DEBUG_LVL, "贷款机构:%s", loan_inst);
+    GetPoolDataByName("LOAN", "LoanType", 0, 0, loan_type, 0);  /*贷款方式*/
+    WriteLog(DEBUG_LVL, "贷款机构:%s", loan_inst);
+    GetPoolDataByName("LOAN", "LoanInst", 0, 0, loan_inst, 0);
+    WriteLog(DEBUG_LVL, "贷款机构:%s", loan_inst);
+	GetPoolDataByName( "LOAN", "LoanInst",  0, 0, inst_no1, 0 );
+	strcpy(manager,open_inst);
+	strcat(manager,"99");
+	PutPoolDataByName( "ABSHEAD", "organ_no",    0, 0, open_inst, 0 );
+	PutPoolDataByName( "ABSHEAD", "_tlr_no",     0, 0, manager,  0 );
+
+    
+	/*取交易流水*/
+	memset(pb_seqno, 0x00, sizeof(pb_seqno) );
+    GetPoolDataByName( "PBSYS", "SrcJourNo", 0, 0, pb_seqno, 0 );
+
+	/*取核心日期*/
+    PayGetCoreDate( pb_date);
+
+	/*登记机构及手续费信息*/
+    EXEC SQL UPDATE t_pb_net_dtl
+        SET payacc = :card_no,
+            rcvacc = :loan_acc,
+            backup1 = :loan_no,
+            payinstno = :open_inst,
+            rcvinstno = :loan_inst,
+            accinstno = :open_inst,
+            transamt = :tran_amt,
+			fee1 = :rb_int,
+			fee = :chargef
+        WHERE trandate = :pb_date
+        AND seqno = :pb_seqno;
+    if( sqlca.sqlcode || sqlca.sqlerrd[2] != 1)
+    {
+        WriteLog( ERR_LVL, "update net_dtl err[%d][%d]", sqlca.sqlcode, sqlca.sqlerrd[2]);
+        WriteLog( ERR_LVL, "pb_date[%s]pb_seqno[%s]", pb_date, pb_seqno);
+        app_err_no=99999;
+        strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理！");
+        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+        PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return PB_ERR;
+    }
+
+    /****************** 处理手续费 *****************/
+    ret = wyget_fee_flag(open_inst, loan_inst);
+    if (ret < 0)
+    {
+        WriteLog( ERR_LVL, "处理手续费失败[%s] [%s]", open_inst, loan_inst);
+        app_err_no=99999;
+        strcpy(err_msg,"处理手续费失败");
+        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+        PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return PB_ERR;
+    }
+    fee_flag = ret; 
+    WriteLog(APP_LVL, "fee_flag:[%d]", fee_flag);     
+	
+	if (fee_flag > 0)
+	{    
+		/*登记柜员日志*/
+		strcpy(pb_tlrlog.tran_seqno, tt_seqno2);	
+		strcpy(pb_tlrlog.tran_date, tran_date);	
+		strcpy(pb_tlrlog.tran_inst, "9996");	
+		sprintf(pb_tlrlog.app_index, "%s%s%s", tran_date, tt_seqno2, pb_tlrlog.tran_inst);
+		strcpy(pb_tlrlog.tran_tlr, "888891");	
+		strcpy(pb_tlrlog.chnl_type, "7");
+		strcpy(pb_tlrlog.dr_cr_flag, "1");
+		strcpy(pb_tlrlog.csh_tsf_flag, "1");
+		strcpy(pb_tlrlog.acc_no, card_no);
+	    GetPoolDataByName("PBSYS", "RChnlNo", 0, 0, pb_tlrlog.chnl_no, 0);
+	    memset(databuf, 0, sizeof(databuf));
+	    GetPoolDataByName("PBSYS", "RTranCode", 0, 0, databuf, 0);
+	    strcpy(pb_tlrlog.out_tran_no, databuf);
+        GetPoolDataByName("PBSYS", "BusiType", 0, 0, pb_tlrlog.busi_type, 0);
+        GetPoolDataByName("PBSYS", "TranCode", 0, 0, pb_tlrlog.tran_no, 0);
+        strcpy(pb_tlrlog.tran_type, "1");       
+        strcpy(pb_tlrlog.tran_stat, "0");
+        GetCurTimeStr(pb_tlrlog.time_stmp);
+        
+        inst_dist = ChkInputInstScope(open_inst, loan_inst);
+        if (inst_dist < 0)
+        {
+            WriteLog( ERR_LVL, "取跨度失败[%s] [%s]", open_inst, loan_inst);
+        app_err_no=99999;
+        strcpy(err_msg,"取跨度失败！");
+        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+        PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+            return (PB_ERR);
+        }    
+        sprintf(dist_flag, "%-d", inst_dist);
+		WriteLog ( APP_LVL, "wwwwwwwwwwww[%s]\n!", dist_flag);
+		/*拼贷款机构支付手续费账号*/
+		EXEC SQL SELECT content INTO :item_no FROM t_pay_sys_para WHERE inst_no = "LOAN" AND  data_code = "loan_fee";
+		if (sqlca.sqlcode != 0)
+		{
+			WriteLog ( ERR_LVL, "取机构手续费支出科目失败sqlcode[%d]\n!", sqlca.sqlcode);
+			strcpy(err_msg,"取机构手续费支出科目失败");
+			app_err_no=99999;
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+			return (PB_ERR);
+		}
+		trim(item_no);
+		
+		EXEC SQL INSERT INTO t_pb_tlrlog VALUES (:pb_tlrlog);
+        if (sqlca.sqlcode)
+        {
+            WriteLog ( ERR_LVL, "插入数据库失败sqlcode[%d]\n!", sqlca.sqlcode);
+        app_err_no=99999;
+        strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理！");
+        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+        PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+        return (PB_ERR);
+        }
+
+		sprintf(inn_acc, "%4s%2s%1s%.12s", loan_inst, "01" , "5", item_no );
+		WriteLog(ERR_LVL, "贷款行支付手续费账号inn_acc[%s]", inn_acc);
+		
+		PutPoolDataByName("ABSHEAD", "_tx_code", 0, 0, "2808", 0);
+		PutPoolDataByName("ABSHEAD", "_seq_no", 0, 0, tt_seqno2,0);
+		PutPoolDataByName("ABSHEAD", "chnl_no", 0, 0, "6", 0);
+		WriteLog(ERR_LVL, "ooooooooooooooo[%s]", tt_seqno2);
+		PutPoolDataByName("ABSHEAD", "chnl_no", 0, 0, "6", 0);
+		PutPoolDataByName("CBS", "AccSign", 0, 0, "0", 0);	   
+		PutPoolDataByName("CBS", "CurrType", 0, 0, "01", 0);
+		if (fee_flag == 1)   	
+	   	{
+			/*收客户手续费*/
+			WriteLog(ERR_LVL, "开始收手续费。。。。。");
+			PutPoolDataByName("CBS", "CertNo", 0, 0, "", 0);
+			PutPoolDataByName( "ABSHEAD", "organ_no",    0, 0, open_inst, 0 );
+			PutPoolDataByName ("CBS", "SubTranCode", 0, 0, "03", 0);
+			PutPoolDataByName ("CBS", "Account", 0, 0, card_no, 0);
+			PutPoolDataByName ("CBS", "Amt", 0, 0, &tran_amt, 0);
+			PutPoolDataByName ("CBS", "Amt", 0, 1, &tran_amt, 0);
+			PutPoolDataByName ( "CBS", "PrdNo", 0, 0, "8007", 0);
+			PutPoolDataByName ("CBS", "feetrancode", 0, 0, "2806", 0);
+			PutPoolDataByName ("CBS", "CshTsfFlag", 0, 0, "1", 0);       
+		    PutPoolDataByName ("CBS", "CshTsfFlag", 0, 1, "1", 0);
+		    PutPoolDataByName ("CBS", "distflag", 0, 0, &dist_flag[0], 0);	
+    		PutPoolDataByName ("CBS", "distflag", 0, 1, &dist_flag[0], 0);   
+    		WriteLog(ERR_LVL, "跨度是：【%c】", dist_flag[0]);
+		}
+		
+		summ_no = 200;
+		PutPoolDataByName ("CBS", "SummNo", 0, 0, &summ_no, 0);
+		PutPoolDataByName ("CBS", "Summary", 0, 0, "手机银行自助贷款还款手续费", 0);
+
+		/* 取5710 记账流水 */
+		strcpy(tmp_seqno, tt_seqno2);
+		ret = PbRegAcc();
+		if (ret == 0)
+		{
+		    WriteLog(ERR_LVL, "============ 手续费记账成功 ============");    
+		}
+		else
+		{
+		    WriteLog(ERR_LVL,"ERROR: 手续费处理错: %d\n",ret);
+			/* strcpy(err_msg,"手续费处理错"); */
+			GetPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			trim(err_msg);
+			app_err_no=99999;
+			if( strlen(err_msg)!=0 )
+			    PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			else
+			    PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, "手续费记账失败", 0 );
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+			ret = wycardloan_ins_revjnl(tmp_seqno,  tran_date);
+			if(ret != 0)
+			{
+			    WriteLog(ERR_LVL,"Call cardloan_ins_revjnl err: %d\n", ret);	
+			}
+            return (PB_ERR);	
+		}
+		WriteLog(ERR_LVL, "收的手续费是：charge_fee[%s]", charge_fee);
+		WriteLog(ERR_LVL," 手续费处理完成--fee_seqno[%s]------------\n",tmp_seqno);
+	}
+	
+    WriteLog(DEBUG_LVL0, "应还利息[%-.2f]", rb_int);
+    /*还欠息*/
+    if (rb_int > 0.001)
+    {
+        PutPoolDataByName("ABSHEAD", "list_seqno", 0, 0, "", 0);
+        PutPoolDataByName("ABSHEAD", "_tx_code", 0, 0, "0420", 0);
+        PutPoolDataByName("ABSHEAD", "_seq_no", 0, 0, tt_seqno4, 0);
+        PutPoolDataByName("LOAN","flag3", 0, 0, "0", 0);
+		PutPoolDataByName("LOAN","flag4", 0, 0, "1", 0);
+		PutPoolDataByName("LOAN", "amt", 0, 0, &rb_int, 0);/**大于零的金额**/
+		PutPoolDataByName("LOAN", "InstNo", 0, 0, open_inst, 0);
+		PutPoolDataByName("LOAN", "LoanNo", 0, 0, loan_no, 0);
+/*
+		PutPoolDataByName("LOAN", "StAcc", 0, 0, loan_acc, 0);
+*/
+		WriteLog( TEST_LVL, "借据号:[%s],欠息[%f]", loan_no, rb_int);
+
+		WriteLog(TEST_LVL,"===============FML打包=================");
+		ret = Data_PackFml("110|0420|0");    
+		if (ret)
+		{
+			WriteLog(ERR_LVL,"ERROR: FML打包错: %d\n",ret);
+			if (strlen(tmp_seqno) > 0)
+			{
+                ret = wycardloan_ins_revjnl(tmp_seqno, tran_date);
+                if (ret != 0)
+                { 
+                    WriteLog(ERR_LVL,"Call cardloan_ins_revjnl failed\n", ret);	
+                }
+			}
+        app_err_no=99999;
+        strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理！");
+        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+        PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+			return (PB_ERR);
+		}
+		WriteLog(TEST_LVL, "=============与核心通讯===============");
+		ret = Comm_AcCallFmlAndUnpack("110|LOANSVC|0420|1");
+		GetPoolDataByName("ABSHEAD","_host_stat", 0, 0, &hoststat, 0);
+		GetPoolDataByName("ABSHEAD","_error_code", 0, 0, err_code, 0);
+		WriteLog(ERR_LVL, "err_code:[%s]", err_code);
+		WriteLog(ERR_LVL, "0420的hoststat是：[%d]", hoststat);
+		if (hoststat == 0)
+		{
+			GetPoolDataByName("LOAN", "InnRb", 0, 0,&rate_amt, 0);
+			GetPoolDataByName("LOAN", "CpndRb", 0, 0,&rate_amt1, 0);
+
+			WriteLog(APP_LVL,"利息:[%f]",rate_amt);
+			WriteLog(APP_LVL, "复息:[%f]",rate_amt1);
+		}
+		else
+		{
+			GetPoolDataByName("ABSHEAD","_error_code", 0, 0, err_msg, 0);
+			if(hoststat == -1)
+			{
+				WriteLog(ERR_LVL, "通讯超时:[%s]", err_msg);
+        app_err_no=99999;
+        strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理！");
+        PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+        PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+        PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+			}
+			else
+			{
+				GetPoolDataByName("ABSHEAD","_error_code", 0, 0, err_msg, 0);
+				app_err_no=99999;
+				strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理！");
+				PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+				PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+				PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+				WriteLog( ERR_LVL, "查询失败:[%s]", err_msg );
+				WriteLog( ERR_LVL, "主机返回:[%d]", hoststat );
+			}
+			if (strlen(tmp_seqno) > 0)
+			{    
+                ret = wycardloan_ins_revjnl(tmp_seqno, tran_date);
+                if (ret != 0)
+                { 
+                    WriteLog(ERR_LVL, "Call cardloan_ins_revjnl failed\n", ret);
+                }
+		    }
+			return (PB_ERR);
+		}
+    }    
+    
+    /******************* 还款 *****************/
+    PutPoolDataByName("ABSHEAD", "_tx_code", 0, 0, "0412", 0);
+    PutPoolDataByName("ABSHEAD", "_seq_no", 0, 0, tt_seqno3, 0);
+    WriteLog(ERR_LVL, "还款流水【%s】", tt_seqno3);
+    
+    PutPoolDataByName("LOAN", "flag3", 0, 0, "0", 0);    /* 还款标志 */
+    PutPoolDataByName("LOAN","DlvGuideLine", 0, 0, (char*)&tran_amt,0); /* 收回本金 */
+    PutPoolDataByName("LOAN","flag1",0,0,"2",0);                        /* 借贷标志 */
+    PutPoolDataByName("LOAN","CshTsfFlag",0,0,"1",0);                   /* 现转标志 */
+    PutPoolDataByName("LOAN", "LoanAcc", 0, 0, loan_acc, 0);
+	PutPoolDataByName("LOAN", "LoanNo", 0, 0, loan_no, 0); 
+	PutPoolDataByName("LOAN", "flag2", 0, 0, "1", 0);
+    
+    WriteLog(TEST_LVL, "=============FML打包===============");
+	ret=Data_PackFml("110|0412|0");
+	if(ret != 0)
+	{
+		WriteLog(ERR_LVL,"ERROR: FML打包错: %d\n", ret);
+		ret = wycardloan_ins_revjnl(tmp_seqno, tran_date);
+		if (ret != 0)
+		{
+		    WriteLog(ERR_LVL, "手续费冲正失败");
+		}
+		app_err_no=99999;
+		strcpy(err_msg,"系统忙，请稍后重试，或联系客服处理！");
+		PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+		PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+		PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		return (PB_ERR);
+	}
+	WriteLog(TEST_LVL, "=============与核心通讯===============");
+	ret = Comm_AcCallFmlAndUnpack("110|LOANSVC|0412|1");
+	GetPoolDataByName( "ABSHEAD", "_host_stat", 0, 0, &hoststat, 0 );
+	    WriteLog(ERR_LVL, "aaaaaaaaa[%d]",hoststat);
+	if( hoststat == 0 )
+	{
+	    WriteLog(ERR_LVL, "====== 0412成功！ =====");
+		/*GetPoolDataByName("LOAN","LoanNo",0,0,loan_no,0);
+		PutPoolDataByName("LOAN","LoanNo",0,0,loan_no,0);
+		*/
+	}
+    else     
+	{
+		GetPoolDataByName("ABSHEAD", "_error_code", 0, 0, err_msg,0 );
+		GetPoolDataByName("ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no,0 );
+		if( app_err_no == -89)
+		{
+			strcpy(err_msg,"还款金额不能大于贷款应还金额");
+			PutPoolDataByName("ABSHEAD", "_error_code", 0, 0, err_msg,0 );
+		}
+		host_stat = hoststat;
+		WriteLog(ERR_LVL, "======= 还本金失败：host_stat[%d] =======", host_stat);
+		if( host_stat == -1 )
+		{
+			strcpy(err_msg,"与核心通讯失败！");
+			WriteLog( ERR_LVL, "通讯超时:[%s]", err_msg );
+		}
+		else
+		{
+			WriteLog( ERR_LVL, "查询失败305:[%s]", err_msg );
+			app_err_no=99999;
+			PutPoolDataByName( "ABSHEAD", "app_err_no", 0, 0, (char *)&app_err_no, 0 );
+			PutPoolDataByName( "ABSHEAD", "_error_code", 0, 0, err_msg, 0 );
+			PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "-1", 0 );
+		}
+		ret = wycardloan_ins_revjnl(tmp_seqno, tran_date);
+		if(ret != 0)
+		{
+		    WriteLog(ERR_LVL,"Call cardloan_ins_revjnl err: %d\n", ret);
+		}
+		return (PB_ERR);
+	}
+    
+    GetPoolDataByName("LOAN", "Intr", 0, 0, (char*)&intr, 0); 
+    WriteLog(ERR_LVL, "还款利息是：[%f]",  intr);
+    GetPoolDataByName("LOAN", "Bal", 0, 0, (char*)&bal, 0); 
+    memset(databuf, 0, sizeof(databuf));
+	sprintf(databuf, "%-.2f", bal);
+	PutPoolDataByName("BUSIIB", "bal", 0, 0, databuf, 0);
+	
+	PutPoolDataByName( "BUSIIB", "thsretCd", 0, 0, "0", 0 );
+    return PB_OK;
+}
+/********************************************
+ * Function    : get_fee_flag()
+ * Description : 得到电话银行收取手续费标识
+ * Input       : inst_no1 --卡的开户机构 inst_no2 --贷款机构
+ * Output      : 无
+ * Return      : -1 -- 失败 
+ *             :  0 --成功且不收取手续费 1--收客户手续费 2--收机构手续费 3--收客户和机构手续费
+ * Create             Date        Action
+ * wg               2012/12/21    Created.
+*/
+static int wyget_fee_flag(char *inst_no1, char *inst_no2)
+{
+    int ret = PB_OK, fee_flag = 0;
+    
+    char msg[60+1];
+    
+    char inst_fn1[12+1];
+    char inst_fn2[12+1];
+    
+    memset(msg, 0, sizeof(msg));
+    
+    memset(inst_fn1, 0, sizeof(inst_fn1));
+    memset(inst_fn2, 0, sizeof(inst_fn2));
+    
+    if (strcmp(inst_no1, inst_no2) == 0)
+    {
+        WriteLog(DEBUG_LVL0, "[%s],[%s],不用收取手续费", inst_no1, inst_no2);
+        return 0;
+    }
+    
+    ret = GetInstFn(inst_no1, inst_fn1);
+    if (ret)
+    {
+        WriteLog(ERR_LVL, "取机构[%s]全码错", inst_no1);
+        return PB_ERR;
+    }    
+
+    ret = GetInstFn(inst_no2, inst_fn2);
+    if (ret)
+    {
+        WriteLog(ERR_LVL, "取机构[%s]全码错", inst_no2);
+        return PB_ERR;
+    }
+    
+    trim(inst_fn1);
+    trim(inst_fn2);
+    
+    /*****发卡行与贷款行为同一县联社内的不同机构****/
+    if (strncmp(inst_fn1, inst_fn2, 4) == 0)
+    {
+        return 0;
+    }
+    
+    /*****发卡行与贷款行为同一市州内的不同机构****/
+    if (strncmp(inst_fn1, inst_fn2, 2) == 0)
+    {
+        return 0;
+    }
+    
+    return 1;
+}
