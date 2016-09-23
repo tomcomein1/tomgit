@@ -1,0 +1,36 @@
+  在Linux下面，编写makefile是一件辛苦的事情。因此，为了减轻程序员编写makefile的负担，人们发明了autoconf和automake这两个工具，可以很好地帮我们解决这个问题。
+    我们可以通过一个简单的示例来说明如何使用配置工具。
+
+（1）首先，编写源文件hello.c。
+[cpp] view plain copy
+#include <stdio.h>  
+  
+int main(int argc, char** argv[])  
+{  
+    printf("hello, world!\n");  
+    return 1;  
+}  
+（2）接下来，我们需要创建一个Makefile.am，同时编写上脚本。
+[cpp] view plain copy
+SUBDIRS=  
+  
+bin_PROGRAMS=hello  
+hello_SOURCES=hello.c    
+
+（3）直接输入autoscan，生成文件configure.scan，再改名为configure.in。
+
+修改脚本AC_INIT(FULL-PACKAGE-NAME, VERSION, BUG-REPORT-ADDRESS)
+为AC_INIT(hello, 1.0, feixiaoxing@163.com)
+
+同时，在AC_CONFIG_HEADER([config.h])后面添加
+AM_INIT_AUTOMAKE(hello, 0.1)
+
+（4）依次输入aclocal命令、autoheader命令
+
+（5）创建4个文件，分别为README、NEWS、AUTHORS和ChangeLog
+
+（6）依次输入automake -a、autoconf命令
+
+（7）输入./configure，生成最终的Makefile
+
+（8）如果需要编译，输入make；如果需要安装， 输入make install；如果需要发布软件包，输入make dist
