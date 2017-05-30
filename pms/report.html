@@ -1,0 +1,135 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8">
+  <title>This is a poptom's manage system.</title>
+  <link rel="stylesheet" href="assets/bootstrap.min.css"/>
+  <link rel="stylesheet" href="assets/bootstrap-theme.min.css"/>
+  <link rel="stylesheet" href="assets/ppt.css"/>
+</head>
+<body>
+  <div class="container">
+    <h1>(Poptom)泡泡糖儿童摄影管理系统</h1>
+    <div class="navbar-header">
+      <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar-menu" aria-expanded="false">
+        <span class="sr-only">Toggle navigation</span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+      </button>
+      <a class="navbar-brand" href="#">Poptom</a>
+    </div>
+    <div id="navbar-menu" class="collapse navbar-collapse">
+      <ul class="nav navbar-nav">
+        <li class="active"><a href="index.html">主页</a></li>
+        <li class="dropdown">
+          <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+            客户管理<b class="caret"></b>
+          </a>
+          <ul class="dropdown-menu">
+            <li><a href="regcust.html">登记客户</a></li>
+            <li><a href="modifycust.html">修改客户资料</a></li>
+          </ul>
+        </li>
+        <li class="dropdown">
+          <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+            预约拍摄管理<b class="caret"></b>
+          </a>
+          <ul class="dropdown-menu">
+            <li><a href="regbook.html">新增预约</a></li>
+            <li><a href="modifybook.html">修改预约信息</a></li>
+            <li><a href="regphoto.html">新增拍摄</a></li>
+            <li><a href="modifyphoto.html">修改拍摄信息</a></li>
+          </ul>
+        </li>
+        <li class="dropdown">
+          <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+            订单流程管理<b class="caret"></b>
+          </a>
+          <ul class="dropdown-menu">
+            <li><a href="mngorder.html">新增订单</a></li>
+            <li><a href="modifyorder.html">修改订单</a></li>
+          </ul>
+        </li>
+        <li class="dropdown">
+          <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+            账务管理<b class="caret"></b>
+          </a>
+          <ul class="dropdown-menu">
+            <li><a href="regacct.html">登记账务</a></li>
+            <li><a href="modifyacct.html">修改删除账务</a></li>
+          </ul>
+        </li>
+        <li class="dropdown">
+          <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+            参数管理<b class="caret"></b>
+          </a>
+          <ul class="dropdown-menu">
+            <li><a href="mngchnl.html">新增渠道</a></li>
+            <li><a href="modifychnl.html">修改删除渠道</a></li>
+            <li><a href="mngsuit.html">新增套系</a></li>
+            <li><a href="modifysuit.html">修改删除套系</a></li>
+          </ul>
+        </li>
+        <li class="dropdown">
+          <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+            报表管理<b class="caret"></b>
+          </a>
+          <ul class="dropdown-menu">
+            <li><a href="report.html">综合查询</a></li>
+            <li><a href="#">报表2</a></li>
+          </ul>
+        </li>
+        <li><a href="about">关于</a></li>
+      </ul>
+    </div>
+    <!--内容侧边栏 -->
+    <div class="container-fluid">
+      <div clas="row-fluid">
+        <div class="span2">
+          <h2>报表查询</h2>
+          <table border='1px'>
+            <tr>
+              <td><label class="l_width" for="cust_name">客户姓名</label></td>
+              <td colspan="2"><input type="text" name="cust_name" id="cust_name" maxlength="60" /></td>
+              <td><button id='bookquery'>预约未拍摄查询</button></td>
+              <td><button id='photoquery'>已拍客户摄查询</button></td>
+            </tr>
+            <tr>
+              <td><label class="l_width" for="custname">客户姓名</label></td>
+              <td colspan="2"><input type="text" name="custname" id="custname" maxlength="60" /></td>
+              <td colspan="2"><button id="custquery">客户情况查询</button></td>
+            </tr>
+            <tr>
+              <td><label class="l_width" for="befor_days">距离当前</label></td>
+              <td colspan="2"><input type="text" name="befor_days" id="befor_days" maxlength="2" value="30" /></td>
+              <td colspan="2"><button id='birthquery'>宝宝生日客户</button></td>
+            </tr>
+            <tr>
+              <td><label class="l_width" for="order_no">订单编号</label></td>
+              <td colspan="2"><input type="text" name="order_no" id="order_no" maxlength="20"/></td>
+              <td colspan="2"><button id='orderquery'>订单跟踪查询</button></td>
+            </tr>
+            <tr>
+              <td><label class="l_width" for="bgndate">起始日期</label></td>
+              <td><input type="date" name="bgndate" id="bgndate" /></td>
+              <td><label class="l_width" for="enddate">结束日期</label></td>
+              <td><input type="date" name="enddate" id="enddate" /></td>
+              <td><button id='acctquery'>账务查询</button></td>
+            </tr>
+          </table>
+        </div>
+        <div class="span10">
+          <h2 id="ajaxret">欢迎来到泡泡糖儿童摄影!</h2>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!--js放在后面加载 -->
+  <script src="assets/jquery.min.js"></script>
+  <script src="assets/bootstrap.min.js"></script>
+  <script type="text/javascript" src="scripts/ajaxcommit.js"></script>
+</body>
+</html>

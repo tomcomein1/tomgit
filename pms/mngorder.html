@@ -1,0 +1,218 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8">
+  <title>This is a poptom's manage system.</title>
+  <link rel="stylesheet" href="assets/bootstrap.min.css"/>
+  <link rel="stylesheet" href="assets/bootstrap-theme.min.css"/>
+  <link rel="stylesheet" href="assets/ppt.css"/>
+</head>
+<body>
+  <div class="container">
+    <h1>(Poptom)泡泡糖儿童摄影管理系统</h1>
+    <div class="navbar-header">
+      <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar-menu" aria-expanded="false">
+        <span class="sr-only">Toggle navigation</span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+      </button>
+      <a class="navbar-brand" href="#">Poptom</a>
+    </div>
+    <div id="navbar-menu" class="collapse navbar-collapse">
+      <ul class="nav navbar-nav">
+        <li class="active"><a href="index.html">主页</a></li>
+        <li class="dropdown">
+          <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+            客户管理<b class="caret"></b>
+          </a>
+          <ul class="dropdown-menu">
+            <li><a href="regcust.html">登记客户</a></li>
+            <li><a href="modifycust.html">修改客户资料</a></li>
+          </ul>
+        </li>
+        <li class="dropdown">
+          <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+            预约拍摄管理<b class="caret"></b>
+          </a>
+          <ul class="dropdown-menu">
+            <li><a href="regbook.html">新增预约</a></li>
+            <li><a href="modifybook.html">修改预约信息</a></li>
+            <li><a href="regphoto.html">新增拍摄</a></li>
+            <li><a href="modifyphoto.html">修改拍摄信息</a></li>
+          </ul>
+        </li>
+        <li class="dropdown">
+          <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+            订单流程管理<b class="caret"></b>
+          </a>
+          <ul class="dropdown-menu">
+            <li><a href="mngorder.html">新增订单</a></li>
+            <li><a href="modifyorder.html">修改订单</a></li>
+          </ul>
+        </li>
+        <li class="dropdown">
+          <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+            账务管理<b class="caret"></b>
+          </a>
+          <ul class="dropdown-menu">
+            <li><a href="regacct.html">登记账务</a></li>
+            <li><a href="modifyacct.html">修改删除账务</a></li>
+          </ul>
+        </li>
+        <li class="dropdown">
+          <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+            参数管理<b class="caret"></b>
+          </a>
+          <ul class="dropdown-menu">
+            <li><a href="mngchnl.html">新增渠道</a></li>
+            <li><a href="modifychnl.html">修改删除渠道</a></li>
+            <li><a href="mngsuit.html">新增套系</a></li>
+            <li><a href="modifysuit.html">修改删除套系</a></li>
+          </ul>
+        </li>
+        <li class="dropdown">
+          <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+            报表管理<b class="caret"></b>
+          </a>
+          <ul class="dropdown-menu">
+            <li><a href="report.html">综合查询</a></li>
+            <li><a href="#">报表2</a></li>
+          </ul>
+        </li>
+        <li><a href="about">关于</a></li>
+      </ul>
+    </div>
+    <!--内容侧边栏 -->
+    <div class="container-fluid">
+      <div class="row-fluid">
+        <div class="span2">
+          <h2>订单登记</h2>
+	  <fieldset>
+	  <legend>订单信息</legend>
+	  <table class="table">
+	  <tr>
+	    <td>
+            <label class='lm_width' for="order_no">订单编号:</label>
+            <input type="text" id="order_no" name="order_no"
+            value="" class="required" maxlength="20" />
+            <label class="redcolor">*</label>
+	    </td>
+	    <td>
+            <label class='lm_width' for="order_date">订单日期:</label>
+            <input type="date" id="order_date" name="order_date"
+            value="" class="required" maxlength="10" />
+            <label class="redcolor">*</label>
+	    </td>
+	  </tr>
+          <tr>
+	    <td colspan="2">
+            <label class='lm_width' for="suit">套系:</label>
+	    <span id="getsuitinfo" name="suit"></span>
+	    <span id="suitret"></span>
+	    </td>
+	  </tr>
+	  <tr>
+	    <td>
+            <label class='lm_width' for="first_date">初修日期:</label>
+            <input type="date" id="first_date" name="first_date"
+            value="" maxlength="22" />
+	    </td>
+	    <td>
+            <label class='lm_width' for="first_man">初修人:</label>
+            <input type="text" id="first_man" name="first_man"
+            value="" maxlength="10" />
+	    </td>
+	  </tr>
+	  </table>
+	  <fieldset>
+	  <legend>后期信息</legend>
+	  <table>
+	   <tr>
+	    <td>
+            <label class='lm_width' for="cp_method">选片方式:</label>
+	    <span id="getcpmethod" name="cp_method"></span>
+	    <span id="cp_methodret"></span>
+	    </td>
+	    <td colspan="2">
+            <label class='lm_width' for="cp_time">选片时间:</label>
+            <input type="datetime-local" id="cp_time" name="cp_time"
+            value="" maxlength="22" ></input>
+	    </td>
+	   </tr>
+	   <tr>
+	    <td colspan="3">
+            <label class='lm_width' for="cp_cont">二销内容:</label>
+            <textarea id="cp_cont" name="cp_cont" maxlength="60"></textarea>
+	    </td>
+	   </tr>
+	   <tr>
+	    <td>
+            <label class='lm_width' for="second_date">精修日期:</label>
+            <input type="date" id="second_date" name="second_date"
+            value="" maxlength="10" />
+	    </td>
+	    <td colspan="2">
+            <label class='lm_width' for="second_man">精修人:</label>
+            <input type="text" id="second_man" name="second_man"
+            value="" maxlength="10" />
+	    </td>
+	   </tr>
+	   <tr>
+	    <td>
+            <label class='lm_width' for="pm_date">交件日期:</label>
+            <input type="date" id="pm_date" name="pm_date"
+            value="" maxlength="22" />
+	    </td>
+	    <td>
+            <label class='lm_width' for="ret_method">回件方式:</label>
+	    <span id="getretmethod"></span>
+	    <span id="ret_methodret"></span>
+	    </td>
+	    <td>
+            <label class='lm_width' for="ret_circs">回件情况:</label>
+            <textarea id="ret_circs" name="ret_circs" maxlength="60"></textarea>
+	    </td>
+	   </tr>
+	   <tr>
+	    <td>
+            <label class='lm_width' for="get_photo">取件时间:</label>
+            <input type="datetime-local" id="get_photo" name="get_photo"
+            value="" maxlength="22" ></input>
+	    </td>
+	    <td>
+            <label class='lm_width' for="get_method">取件方式:</label>
+	    <span id="getgetmethod"></span>
+	    <span id="get_methodret"></span>
+	    </td>
+	    <td>
+            <label class='lm_width' for="get_memo">取件备注:</label>
+            <textarea id="get_memo" name="get_memo" maxlength="60"></textarea>
+	    </td>
+	   </tr>
+           <tr>
+	    <td colspan="3">
+            <label class='lm_width' for="order_memo">订单备注:</label>
+            <textarea id="order_memo" name="order_memo" maxlength="120"></textarea>
+	    </td>
+	   </tr>
+	  </table>
+	  </fieldset>
+	  </fieldset>
+          <button id="insert_order">新增</button>
+        </div>
+        <div class="span10">
+          <p id="dynamic_content"></p>
+          <h2 id="ajaxret">欢迎来到泡泡糖儿童摄影!</h2>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!--js放在后面加载 -->
+  <script src="assets/jquery.min.js"></script>
+  <script src="assets/bootstrap.min.js"></script>
+  <script type="text/javascript" src="scripts/ajaxcommit.js"></script>
+</body>
+</html>

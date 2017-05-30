@@ -1,0 +1,99 @@
+/**typography define*/
+*{
+    margin:0;
+    padding: 0;
+}
+
+body{
+  /*background-color:#ccf; */
+  /* background-color:#ccc; */
+  background-image: url(../images/background.jpg); 
+  background-position: top left;
+  background-repeat: repeat;
+}
+
+body h1,h2 {
+   color: blue;
+}
+
+dt{
+    margin-right: auto auto;
+}
+dd{
+    margin-right: auto auto;
+}
+
+th{
+    color:#edc;
+    font-size:14px;
+    background-color: #455;
+}
+tr{
+    color: #223;
+    font-size:12px;
+    background-color: #fff;
+}
+tr.odd td{
+    color:#223;
+    background-color: #ec8;
+}
+tr.highlight td{
+    color:#223;
+    background-color: #cba;
+}
+
+input.color_ccc{
+    background:#ccc;
+}
+
+.redcolor{
+    color: red;
+}
+.wanning{
+    font-size: 20px;
+    color: red;
+}
+
+/**layout define**/
+
+td{
+    padding:1px 1px;
+}
+dl{
+    overflow: hidden;
+}
+dt{
+    float:left;
+}
+dd{
+    float:left;
+}
+
+fieldset{
+    border:0;
+}
+
+label.l_width{
+    display:inline-block;
+    width:90px;
+    font-size: 14px;
+}
+
+label.lm_width{
+    display:inline-block;
+    width:120px;
+    font-size: 14px;
+}
+fieldset { 
+    padding:10px; 
+    margin:10px; 
+    width:auto; 
+    color:#333; 
+    border:#06c dashed 1px;
+    background-color:transparent;
+}
+legend {color:#06c; font-size:14px; font-weight:400px; background:#fff;}
+.inputtrans {
+    background-color:transparent; 
+}
+

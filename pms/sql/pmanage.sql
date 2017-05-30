@@ -1,0 +1,180 @@
+/*--use db: poptomdb*/
+create database IF NOT EXISTS poptomdb;
+
+create user 'poptom'@'localhost' identified by 'poptom321';
+grant all on poptomdb.* to 'poptom'@'localhost'; 
+FLUSH PRIVILEGES;
+use poptomdb;
+
+SET NAMES gbk;
+/*--用户信息表*/
+DROP TABLE IF EXISTS p_user;
+CREATE TABLE IF NOT EXISTS p_user
+(
+    userid  int(5) unsigned NOT NULL AUTO_INCREMENT COMMENT '用户编号', 
+    user_phone varchar(30) NOT NULL COMMENT '用户电话',  
+    user_name varchar(30) NOT NULL COMMENT '用户姓名', 
+    user_pass varchar(30) COMMENT '用户密码',
+    user_auth char(1) NOT NULL default '0' COMMENT '用户权限',  
+    PRIMARY KEY(userid)
+)engine=MyISAM default charset=utf8; 
+
+/*--会员表*/
+DROP TABLE IF EXISTS p_member;
+CREATE TABLE IF NOT EXISTS p_member
+(
+    mbid int(5) unsigned NOT NULL AUTO_INCREMENT COMMENT '会员ID',
+    mb_no varchar(22) NOT NULL COMMENT '会员编号',
+    mb_level int(3) unsigned COMMENT '会员等级',
+    mb_explain varchar(20) COMMENT '会员说明',
+    PRIMARY KEY(mbid)
+)engine=MyISAM default charset=utf8;
+
+/*--渠道表*/
+DROP TABLE IF EXISTS p_channel ;
+CREATE TABLE IF NOT EXISTS p_channel
+(
+    chnlid  int(5) unsigned NOT NULL AUTO_INCREMENT COMMENT '渠道ID',
+    chnl  char(10) NOT NULL COMMENT '渠道类型',
+    chnl_name  varchar(30) COMMENT '渠道名称', 
+    PRIMARY KEY(chnlid)
+)engine=MyISAM default charset=utf8;
+
+/*--选片取件方式*/
+DROP TABLE IF EXISTS `p_method`;
+CREATE TABLE IF NOT EXISTS `p_method`(
+    `mid` int(5) unsigned NOT NULL AUTO_INCREMENT COMMENT '选取方式ID',
+    `method` varchar(8) NOT NULL COMMENT '选取方式',
+    `method_name` varchar(20) COMMENT '选取名称',
+    PRIMARY KEY(mid)
+)engine=MyISAM default charset=utf8;
+insert into `p_method`(`method`,`method_name`) values('dd', '到店');
+insert into `p_method`(`method`,`method_name`) values('email', '电子邮件');
+insert into `p_method`(`method`,`method_name`) values('kd', '快递');
+insert into `p_method`(`method`,`method_name`) values('sm', '上门');
+insert into `p_method`(`method`,`method_name`) values('other', '其它');
+
+/*--套系表*/
+DROP TABLE IF EXISTS p_suit ;
+CREATE TABLE IF NOT EXISTS p_suit
+(
+    suitid int(5) unsigned NOT NULL AUTO_INCREMENT COMMENT '套系ID',
+    suit  varchar(10) NOT NULL COMMENT '套系类型',
+    suit_name  varchar(30) COMMENT '套系名称', 
+    suit_amt decimal(10,2) COMMENT '套系金额',
+    suit_cont varchar(255) NOT NULL COMMENT '套系内容',
+    PRIMARY KEY(suitid)
+)engine=MyISAM default charset=utf8;
+
+/*-- 客户信息表p_custom */
+DROP TABLE IF EXISTS p_custom;
+CREATE TABLE IF NOT EXISTS p_custom
+(
+    custid int(8) unsigned NOT NULL AUTO_INCREMENT COMMENT '客户编号',
+    baby_name varchar(60) NOT NULL COMMENT  '宝宝姓名',
+    baby_birth varchar(10) COMMENT '宝宝生日',
+    nick_name varchar(20) COMMENT '宝宝小名',
+    baby_sex char(1) default '0' COMMENT '宝宝性别', 
+    cust_phone varchar(30) NOT NULL COMMENT '家长电话',
+    cust_name  varchar(60) COMMENT '家长姓名',
+    qq varchar(20) default '' COMMENT '家长QQ号',
+    chnl varchar(10) COMMENT '渠道来源',
+    addr varchar(128) COMMENT '客户地址',
+    mb_no varchar(22) COMMENT '会员编号', 
+    memo varchar(120) COMMENT '备注信息',
+    reg_date varchar(10) COMMENT  '登记日期',
+    datetime varchar(22) COMMENT '最后修改时间',
+    PRIMARY KEY (custid)
+)engine=MyISAM default charset=utf8;
+CREATE INDEX idx_cust_name ON p_custom(baby_name);
+
+/*--预约登记表this.custid=custom.custid,this.chnl_type=channl.chnl_type*/
+DROP TABLE IF EXISTS p_booking;
+CREATE TABLE IF NOT EXISTS p_booking
+( 
+    bookid int(8) unsigned NOT NULL AUTO_INCREMENT COMMENT '预约编号',
+    book_date varchar(10) NOT NULL COMMENT '预约拍摄日期',
+    book_time varchar(6)  COMMENT '预约拍摄时间',
+    suit varchar(20)  COMMENT '预约套系',
+    chnl varchar(10) COMMENT '渠道类型',
+    method varchar(10) COMMENT '预约拍摄方式',
+    custid  int(8) unsigned NOT NULL COMMENT '客户编号',
+    order_no varchar(20) COMMENT '订单编号',
+    book_memo varchar(60) COMMENT '预约备注',
+    datetime varchar(22) COMMENT '最后修改时间',
+    PRIMARY KEY(bookid)
+)engine=MyISAM default charset=utf8;
+CREATE INDEX idx_book_oc ON p_booking(order_no, custid);
+
+/*--拍摄情况登记表,this.bookid=pbooking.bookid,this.custid=custom.custid*/
+DROP TABLE IF EXISTS p_photography;
+CREATE TABLE IF NOT EXISTS p_photography 
+( 
+    photoid mediumint(8) unsigned NOT NULL AUTO_INCREMENT COMMENT '拍摄编号', 
+    photo_date  char(10) NOT NULL COMMENT '拍摄日期',
+    photo_man varchar(10) COMMENT '摄影师',
+    bookid int(8) unsigned COMMENT '预约编号',
+    custid int(8) unsigned NOT NULL COMMENT '客户编号',
+    order_no varchar(20) COMMENT '订单编号', 
+    photo_memo varchar(120) COMMENT '拍摄备注',
+    datetime varchar(22) COMMENT '最后修改时间',
+    PRIMARY KEY(photoid)
+)engine=MyISAM default charset=utf8;
+CREATE INDEX idx_photo_cbo ON p_photography(custid, bookid, order_no);
+
+/*--账务登记薄*/
+DROP TABLE IF EXISTS p_acctreg;
+CREATE TABLE IF NOT EXISTS p_acctreg
+( 
+    regid int(8) unsigned NOT NULL AUTO_INCREMENT COMMENT '账务编号', 
+    acct_date varchar(10) NOT NULL COMMENT '账务日期', 
+    dr_cr char(1) NOT NULL default '2' COMMENT '借贷类型', 
+    acct_amt  decimal(15,2) NOT NULL COMMENT '发生金额', 
+    pay_mode varchar(10) COMMENT '收付方式',
+    pay_man  varchar(10) COMMENT '收付款人',
+    reg_man  varchar(10) COMMENT '记账人',
+    user_phone varchar(15) COMMENT '用户号',
+    reg_memo varchar(120) COMMENT '记账备注',
+    reg_date varchar(10) COMMENT '登记日期', 
+    is_valid char(1) default 'Y' COMMENT '账务有效标志', 
+    datetime varchar(22) COMMENT '最后修改时间',
+    PRIMARY KEY(regid)
+)engine=MyISAM default charset=utf8;
+CREATE INDEX idx_acct_date ON p_acctreg(acct_date);
+
+/*--客户订单信息跟踪表1-到店选 2-电子邮件3-其它
+取件方式：1-到店取 2-发快递 3-其它备注*/
+DROP TABLE IF EXISTS p_order;
+CREATE TABLE IF NOT EXISTS p_order
+(
+    orderid int(8) unsigned NOT NULL AUTO_INCREMENT COMMENT '订单ID',
+    order_no varchar(20) NOT NULL COMMENT '订单编号', 
+    order_date varchar(10) NOT NULL COMMENT '订单日期',
+    suit varchar(20) COMMENT '套系',
+    first_date varchar(10) COMMENT '初修日期',
+    first_man varchar(10) COMMENT '初修人',
+    cp_time varchar(22) COMMENT '选片时间',
+    cp_method varchar(8) COMMENT '选片方式',
+    cp_cont varchar(60) COMMENT '二销内容',
+    second_date varchar(10) COMMENT '精修日期',
+    second_man varchar(10) COMMENT '精修人',
+    pm_date varchar(10) COMMENT '交件日期',
+    ret_method varchar(8) COMMENT '回件方式',
+    ret_circs varchar(60) COMMENT '回件情况',
+    get_photo varchar(22) COMMENT '取件时间',
+    get_method varchar(8) COMMENT '取件方式',
+    get_memo varchar(60) COMMENT '取件备注',
+    order_stat char(1) default '0' COMMENT '订单状态',
+    order_memo varchar(255) COMMENT '订单备注',
+    datetime varchar(22) COMMENT '最后修改时间',
+    PRIMARY KEY(orderid)
+)engine=MyISAM default charset=utf8;
+CREATE INDEX idx_order_no ON p_order(order_no);
+
+/**
+select column_name, column_comment
+            from INFORMATION_SCHEMA.COLUMNS
+            where table_name='p_custom'
+            order by ordinal_position;
+show variables like 'char%';
+**/
