@@ -4,7 +4,7 @@
 function sel_cust_info($db){
     $baby_name=$_POST["baby_name"];
     $sql="select * from p_custom ";
-    if ($cust_name!=""){
+    if ($baby_name!=""){
         $sql .= "where baby_name like '%$baby_name%' ";
     }
 
