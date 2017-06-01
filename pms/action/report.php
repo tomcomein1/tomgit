@@ -3,7 +3,7 @@
 include_once "./db.pub.php";
 
 function custquery($db){
-    $custname=$_POST["custname"];
+    $babyname=$_POST["babyname"];
 
     $sql="select * from p_custom a
         left join p_booking b
@@ -11,7 +11,7 @@ function custquery($db){
         left join p_photography c
           on b.custid = c.custid ";
     if($custname!=""){
-        $sql.="where a.cust_name like '%$custname%' ";
+        $sql.="where a.baby_name like '%$babyname%' ";
     }
     $sql .= "order by a.custid desc";
 
@@ -89,13 +89,13 @@ function acctquery($db){
 
 //已拍摄客户查询
 function photoquery($db){
-    $cust_name=$_POST["cust_name"];
+    $baby_name=$_POST["baby_name"];
 
     $sql="select photo_date, photo_man, cust_name,cust_phone,baby_name,baby_birth,baby_sex
         from p_photography A, p_custom B
         where A.custid=B.custid ";
     if($cust_name!=""){
-        $sql .= " and B.cust_name like '%$cust_name%' ";
+        $sql .= " and B.baby_name like '%$baby_name%' ";
     }
     $sql .=" order by photoid desc ";
     //echo $sql;
@@ -118,7 +118,7 @@ function photoquery($db){
 
 //预约且未拍摄客户查询
 function bookquery($db){
-    $cust_name=$_POST["cust_name"];
+    $baby_name=$_POST["baby_name"];
 
     $sql= "select a.* ,b.* from p_booking a
                left join p_custom b on a.custid = b.custid
@@ -126,7 +126,7 @@ function bookquery($db){
 	              select 1 from p_photography c
 		       where a.bookid=c.bookid) ";
     if($cust_name!=""){
-        $sql .= " and B.cust_name like '%$cust_name%' ";
+        $sql .= " and B.baby_name like '%$baby_name%' ";
     }
     $sql .=" order by A.bookid desc ";
     // echo $sql;

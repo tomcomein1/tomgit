@@ -83,58 +83,24 @@
         </li>
         <li><a href="about">关于</a></li>
 	<li><a href="login.html">登录注销</a></li>
-	<span class="navbar-brand" id="username"></span>
+	<span class="navbar-brand" id="username"></a>
       </ul>
     </div>
     <!--内容侧边栏 -->
     <div class="container-fluid">
-      <div clas="row-fluid">
+      <div class="row-fluid">
         <div class="span2">
-          <h2>账务登记</h2>
-          <p>
-            <label for="acct_date" class="l_width">账务日期:</label>
-            <input type="date" id="acct_date" name="acct_date"
-            value="" class="required" />
-            <label class="redcolor">*</label>
-          </p>
-          <p>
-            <label for="dr_cr" class="l_width">借贷标志:</label>
-            <label><input type="radio" checked="checked" name="dr_cr" value="2" />收入</label>
-            <label><input type="radio" name="dr_cr" value="1" />支出</label>
-          </p>
-          <p>
-            <label for="acct_amt" class="l_width">发生额:</label>
-            <input type="text" id="acct_amt" name="acct_amt"
-            value="" class="required amt" maxlength="17" />
-            <label class="redcolor">*</label>
-          </p>
-          <p>
-            <label for="pay_mode" class="l_width">收支方式:</label>
-            <input type="text" id="pay_mode" name="pay_mode"
-            value="现金" maxlength="10" />
-          </p>
-          <p>
-            <label for="pay_man" class="l_width">收付款人:</label>
-            <input type="text" id="pay_man" name="pay_man"
-            value="李明艳" maxlength="10" />
-          </p>
-          <p>
-            <label for="reg_man" class="l_width">记账人:</label>
-            <input type="text" id="reg_man" name="reg_man"
-            value="李明艳" maxlength="10" />
-          </p>
-          <p>
-            <label for="user_phone" class="l_width">操作员:</label>
-            <input type="text" id="user_phone" name="user_phone"
-            value="13060009530" maxlength="15" />
-          </p>
-          <p>
-            <label for="reg_memo" class="l_width">备注:</label>
-            <textarea type="text" id="reg_memo" name="reg_memo" maxlength="120"></textarea>
-          </p>
-          <button id="insert_acctreg">新增</button>
+	   <p><label for="user_phone">用户电话:</label>
+	      <input type="text" value="" class="phone" maxlength="30" id="user_phone" name="user_phone" />
+	   </p>
+	   <p><label for="user_pass">用户密码:</label>
+	      <input type="password" value="" class="required" maxlength="30" id="user_pass" name="user_pass" />
+	   </p>
+	   <button id="login">登录</button>
+           <button id="logout">注销</button>
         </div>
         <div class="span10">
+          <p id="dynamic_content"></p>
           <h2 id="ajaxret">欢迎来到泡泡糖儿童摄影!</h2>
         </div>
       </div>

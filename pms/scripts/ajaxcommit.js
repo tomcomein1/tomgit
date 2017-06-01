@@ -647,12 +647,6 @@ var getSelectInfo=function(element, str, id){
   element.onchange=onchange(str, id);
 };
 
-var todayWarn=function(element, str, id){
-  var onchange=function(str, id){
-    ajaxCommit("action/select.php", "GET", str, id);
-  }
-  element.onchange=onchange(str, id);
-}
 /*取得后台列表框事件*/
 if(document.getElementById("getchnlinfo")){
   getSelectInfo(document.getElementById("getchnlinfo"), "oper=chnl&value=''", "chnlret");
@@ -671,7 +665,11 @@ if(document.getElementById("getgetmethod")){
   getSelectInfo(document.getElementById("getgetmethod"), "oper=method&name=get_method&value=''", "get_methodret");
 }
 if(document.getElementById("todaywarn")){
-  todayWarn(document.getElementById("todaywarn"), "oper=todaywarn&value=''", "dynamic_content");
+  getSelectInfo(document.getElementById("todaywarn"), "oper=todaywarn&value=''", "dynamic_content");
+}
+
+if(document.getElementById("navbar-menu")){
+  getSelectInfo(document.getElementById("navbar-menu"), "oper=get_username&value=''", "username");
 }
 
 

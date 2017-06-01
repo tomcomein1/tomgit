@@ -47,7 +47,20 @@ function get_table_style(){
 
 /*共公检查类函数*/
 function public_check(){
-//   return isset($_POST["oper"]);
+
+   //跳过登录注销权限检查
+   if($_POST["id"] == "login" || $_POST["id"] == "logout") {
+       return true;
+   }
+
+   session_start();
+   $user=$_SESSION['user'];
+
+   if ($user=="") {
+      echo "请先登录!";
+      return false;
+   }
+
    return isset($_POST["id"]);
 }
 

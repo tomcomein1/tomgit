@@ -5,6 +5,7 @@ include_once "./db.pub.php";
 include_once "./regbook.php";
 include_once "./regphoto.php";
 include_once "./report.php";
+include_once "./session.php";
 
 if (public_check()==false ) {
    echo "你无权操作该功能.";
