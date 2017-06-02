@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS p_user
     user_auth char(1) NOT NULL default '0' COMMENT '用户权限',  
     PRIMARY KEY(userid)
 )engine=MyISAM default charset=utf8; 
+insert into p_user(user_phone, user_name, user_pass, user_auth) values('admin', 'manage', 'admin', 'S');
 
 /*--会员表*/
 DROP TABLE IF EXISTS p_member;

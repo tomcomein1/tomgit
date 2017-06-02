@@ -5,6 +5,7 @@ include_once "libs/classes/db_mysqli.class.php";
 function open_database(){
     global $host, $user, $pass, $dbname;
     $config=array(
+	"debug"=>false,
         "autoconnect"=>1,
         "hostname"=>$host,
         "username"=>$user,
@@ -204,6 +205,10 @@ function public_router( ){
     $table='p_'.$table1;
 
 $db=open_database();
+if(mysqli_connect_errno()){
+  echo "您的数据库服务还未开启,请联系管理员.";
+  return false;
+}
 
     // $db->query("set names utf8");
 //echo $oper.'-'.$table.'<br />';

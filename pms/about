@@ -84,6 +84,7 @@
           </ul>
         </li>
         <li><a href="about">关于</a></li>
+        <span class="navbar-brand" id="username"></span>
       </ul>
     </div>
     <!--内容侧边栏 -->

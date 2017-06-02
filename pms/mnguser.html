@@ -1,0 +1,135 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
+  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8">
+  <title>This is a poptom's manage system.</title>
+  <link rel="stylesheet" href="assets/bootstrap.min.css"/>
+  <link rel="stylesheet" href="assets/bootstrap-theme.min.css"/>
+  <link rel="stylesheet" href="assets/ppt.css"/>
+</head>
+<body>
+  <div class="container">
+    <h1>(Poptom)泡泡糖儿童摄影管理系统</h1>
+    <div class="navbar-header">
+      <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar-menu" aria-expanded="false">
+        <span class="sr-only">Toggle navigation</span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+      </button>
+      <a class="navbar-brand" href="#">Poptom</a>
+    </div>
+    <div id="navbar-menu" class="collapse navbar-collapse">
+      <ul class="nav navbar-nav">
+        <li class="active"><a href="index.html">主页</a></li>
+        <li class="dropdown">
+          <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+            客户管理<b class="caret"></b>
+          </a>
+          <ul class="dropdown-menu">
+            <li><a href="regcust.html">登记客户</a></li>
+            <li><a href="modifycust.html">修改客户资料</a></li>
+          </ul>
+        </li>
+        <li class="dropdown">
+          <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+            预约拍摄管理<b class="caret"></b>
+          </a>
+          <ul class="dropdown-menu">
+            <li><a href="regbook.html">新增预约</a></li>
+            <li><a href="modifybook.html">修改预约信息</a></li>
+            <li><a href="regphoto.html">新增拍摄</a></li>
+            <li><a href="modifyphoto.html">修改拍摄信息</a></li>
+          </ul>
+        </li>
+        <li class="dropdown">
+          <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+            订单流程管理<b class="caret"></b>
+          </a>
+          <ul class="dropdown-menu">
+            <li><a href="mngorder.html">新增订单</a></li>
+            <li><a href="modifyorder.html">修改订单</a></li>
+          </ul>
+        </li>
+        <li class="dropdown">
+          <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+            账务管理<b class="caret"></b>
+          </a>
+          <ul class="dropdown-menu">
+            <li><a href="regacct.html">登记账务</a></li>
+            <li><a href="modifyacct.html">修改删除账务</a></li>
+          </ul>
+        </li>
+        <li class="dropdown">
+          <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+            参数管理<b class="caret"></b>
+          </a>
+          <ul class="dropdown-menu">
+            <li><a href="mngchnl.html">新增渠道</a></li>
+            <li><a href="modifychnl.html">修改删除渠道</a></li>
+            <li><a href="mngsuit.html">新增套系</a></li>
+            <li><a href="modifysuit.html">修改删除套系</a></li>
+            <li><a href="mnguser.html">新增用户</a></li>
+          </ul>
+        </li>
+        <li class="dropdown">
+          <a href="#" class="dropdown-toggle" data-toggle="dropdown">
+            报表管理<b class="caret"></b>
+          </a>
+          <ul class="dropdown-menu">
+            <li><a href="report.html">综合查询</a></li>
+            <li><a href="#">报表2</a></li>
+          </ul>
+        </li>
+        <li><a href="about">关于</a></li>
+	<li><a href="login.html">登录注销</a></li>
+	<span class="navbar-brand" id="username"></span>
+      </ul>
+    </div>
+    <!--内容侧边栏 -->
+    <div class="container-fluid">
+      <div class="row-fluid">
+        <div class="span2">
+          <h2>用户登记</h2>
+          <p>
+            <label for="user_phone">用户电话:</label>
+            <input type="text" id="user_phone" name="user_phone"
+            value="" class="required" maxlength="30" />
+            <label class="redcolor">*</label>
+          </p>
+          <p>
+            <label for="user_name">用户名称:</label>
+            <input type="text" id="user_name" name="user_name"
+            value="" class="required" maxlength="30" />
+            <label class="redcolor">*</label>
+          </p>
+          <p>
+            <label for="user_pass">用户密码:</label>
+            <input type="text" id="user_pass" name="user_pass"
+            value="" class="required" maxlength="30" />
+            <label class="redcolor">*</label>
+          </p>
+          <p>
+            <label for="user_auth">用户权限:</label>
+	    <select name="user_auth">
+               <option value='0' selected="selected">普通用户</option>
+               <option value='S'>超级用户</option>
+	    </select>
+          </p>
+          <button id="insert_user">新增用户</button>
+        </div>
+        <div class="span10">
+          <p id="dynamic_content"></p>
+          <h2 id="ajaxret">欢迎来到泡泡糖儿童摄影!</h2>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!--js放在后面加载 -->
+  <script src="assets/jquery.min.js"></script>
+  <script src="assets/bootstrap.min.js"></script>
+  <script type="text/javascript" src="scripts/ajaxcommit.js"></script>
+</body>
+</html>

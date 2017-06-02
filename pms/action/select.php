@@ -7,6 +7,10 @@ product_select();
 function product_select(){
 /*打开数据库连接*/
     $db=open_database();
+    if (mysqli_connect_errno()) {
+       echo "您的数据库未开启，请联系管理员!";
+       return false;
+    }
 
     $oper=$_GET["oper"];
     if($oper=="chnl"){
