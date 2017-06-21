@@ -7,14 +7,12 @@ function sel_cust_info($db){
     if ($baby_name!=""){
         $sql .= "where baby_name like '%$baby_name%' ";
     }
-
     $sql.="order by custid desc";
-
 //echo $sql;
 
     echo get_table_style();
     echo table_head("客户编号", "宝宝姓名", "宝宝生日", "宝宝小名", "宝贝性别",
-                    "家长电话", "家长姓名", "家长qq号", "渠道来源", "客户地址", 
+                    "家长电话", "家长姓名", "家长qq号", "渠道来源", "客户地址",
 		    "会员编号", "备注信息", "功能");
     $results=$db->query($sql);
 
@@ -36,7 +34,6 @@ function sel_booking($db){
 	         on a.custid=b.custid ";
 
     $sql.="order by bookid desc";
-
 //echo $sql;
 
     echo get_table_style();

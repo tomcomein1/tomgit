@@ -1,6 +1,5 @@
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"
-  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml">
+<!DOCTYPE html>
+<html> 
 <head>
   <meta charset="utf-8">
   <title>This is a poptom's manage system.</title>
@@ -70,6 +69,7 @@
             <li><a href="modifychnl.html">修改删除渠道</a></li>
             <li><a href="mngsuit.html">新增套系</a></li>
             <li><a href="modifysuit.html">修改删除套系</a></li>
+	    <li><a href="mnguser.html">新增用户</a></li>
           </ul>
         </li>
         <li class="dropdown">
@@ -82,6 +82,8 @@
           </ul>
         </li>
         <li><a href="about">关于</a></li>
+	<li><a href="login.html">登录注销</a></li>
+	<span class="navbar-brand" id="username"></span>
       </ul>
     </div>
     <!--内容侧边栏 -->
@@ -91,7 +93,7 @@
           <h2>套系登记</h2>
           <p>
             <label for="suit">套系类型:</label>
-            <input type="text" id="suit" name="suit"
+            <input type="text" id="suit" name="suit" autofocus 
             value="" class="required" maxlength="10" />
             <label class="redcolor">*</label>
           </p>
@@ -103,8 +105,7 @@
           </p>
           <p>
             <label for="suit_amt">套系金额:</label>
-            <input type="text" id="suit_amt" name="suit_amt"
-            value="" class="amt" maxlength="10" />
+            <input type="number" id="suit_amt" name="suit_amt" />
           </p>
           <p>
             <label for="suit_cont">套系内容:</label>

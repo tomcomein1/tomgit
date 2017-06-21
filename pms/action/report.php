@@ -13,7 +13,16 @@ function custquery($db){
     if($custname!=""){
         $sql.="where a.baby_name like '%$babyname%' ";
     }
+
+    $totoal=$db->num_rows($sql);
     $sql .= "order by a.custid desc";
+    $page=$_REQUEST[page];
+    if (empty($page)) {
+        $page=1;
+    }
+    $nums = 10;
+    $bgnpageno=($page - 1)*$nums;
+    $sql .= " limit $bgnpageno, $nums ";
 
 // echo $sql;
     echo get_table_style();
@@ -40,6 +49,7 @@ function custquery($db){
 	     $book_date, $row['suit'], $photo_date ,$row['photo_man'], $row['chnl'] );
     }
     echo "</table>";
+    process_page(1, ($totoal/$nums)+1, "custquery");
 }
 
 function acctquery($db){
@@ -53,7 +63,15 @@ function acctquery($db){
     if ($enddate!=""){
         $sql .= "and acct_date<='$enddate' ";
     }
+    $totoal=$db->num_rows($sql);
     $sql .= "order by regid ";
+    $page=$_REQUEST[page];
+    if (empty($page)) {
+        $page=1;
+    }
+    $nums = 10;
+    $bgnpageno=($page - 1)*$nums;
+    $sql .= " limit $bgnpageno, $nums ";
 
     echo get_table_style();
     echo table_head("账务编号","账务日期","借贷标志", "发生额", "收支方式", "收付款人", "登记人",
@@ -84,6 +102,7 @@ function acctquery($db){
 
     echo table_body("合计:", "-", "总收入:", $csum."元", "总支出:", $dsum."元", "利润:", ($csum-$dsum)."元", "-", "-");
     echo "</table>";
+    process_page(1, ($totoal/$nums)+1, "acctquery");
     return true;
 }
 
@@ -97,7 +116,15 @@ function photoquery($db){
     if($cust_name!=""){
         $sql .= " and B.baby_name like '%$baby_name%' ";
     }
+    $totoal=$db->num_rows($sql);
     $sql .=" order by photoid desc ";
+    $page=$_REQUEST[page];
+    if (empty($page)) {
+        $page=1;
+    }
+    $nums = 10;
+    $bgnpageno=($page - 1)*$nums;
+    $sql .= " limit $bgnpageno, $nums ";
     //echo $sql;
 
     echo get_table_style();
@@ -114,6 +141,7 @@ function photoquery($db){
 	     $row['photo_date'],$row['photo_man'] );
     }
     echo "</table>";
+    process_page(1, ($totoal/$nums)+1, "photoquery");
 }
 
 //预约且未拍摄客户查询
@@ -128,7 +156,15 @@ function bookquery($db){
     if($cust_name!=""){
         $sql .= " and B.baby_name like '%$baby_name%' ";
     }
+    $totoal=$db->num_rows($sql);
     $sql .=" order by A.bookid desc ";
+    $page=$_REQUEST[page];
+    if (empty($page)) {
+        $page=1;
+    }
+    $nums = 10;
+    $bgnpageno=($page - 1)*$nums;
+    $sql .= " limit $bgnpageno, $nums ";
     // echo $sql;
 
     echo get_table_style();
@@ -144,6 +180,7 @@ function bookquery($db){
             $row['cust_name'], $row['cust_phone'], $row['baby_name'],$row['baby_birth'], $sex, $row['memo'] );
     }
     echo "</table>";
+    process_page(1, ($totoal/$nums)+1, "bookquery");
 }
 
 function birthquery($db) {
@@ -164,9 +201,17 @@ function birthquery($db) {
           on b.custid = c.custid ";
     $sql.="where
         concat(substring(now(),1,4),'-',substring(baby_birth,6)) >= '$currdate'
-        and concat(substring(now(),1,4),'-',substring(baby_birth,6)) <= '$date'
-        order by a.custid desc";
+        and concat(substring(now(),1,4),'-',substring(baby_birth,6)) <= '$date' ";
 
+    $totoal=$db->num_rows($sql);
+    $sql.=" order by a.custid desc ";
+    $page=$_REQUEST[page];
+    if (empty($page)) {
+        $page=1;
+    }
+    $nums = 10;
+    $bgnpageno=($page - 1)*$nums;
+    $sql .= " limit $bgnpageno, $nums ";
 // echo $sql;
     echo get_table_style();
     echo table_head( "宝贝名称", "宝贝生日", "宝贝性别", "家长名称", "家长电话",
@@ -193,6 +238,7 @@ function birthquery($db) {
 	$book_date,$row['suit'], $row['chnl'], $photo_date ,$row['photo_man'] );
     }
     echo "</table>";
+    process_page(1, ($totoal/$nums)+1, "birthquery");
 }
 
 //预约且未拍摄客户查询
@@ -205,7 +251,7 @@ function orderquery($db){
        $method[$rows['method']]=$rows['method_name'];
     }
 
-    $sql= "select a.*, b.photo_date,c.baby_name,c.cust_phone,c.chnl, d.book_date 
+    $sql= "select a.*, b.photo_date,c.baby_name,c.cust_phone,c.chnl, d.book_date
         from p_order a
         left join p_photography b
           on a.order_no = b.order_no
@@ -216,7 +262,16 @@ function orderquery($db){
     if($order_no!=""){
         $sql .= " where a.order_no like '%$order_no%' ";
     }
+
+    $totoal=$db->num_rows($sql);
     $sql .=" order by a.orderid desc ";
+    $page=$_REQUEST[page];
+    if (empty($page)) {
+        $page=1;
+    }
+    $nums = 10;
+    $bgnpageno=($page - 1)*$nums;
+    $sql .= " limit $bgnpageno, $nums ";
  //    echo $sql;
 
     echo get_table_style();
@@ -246,4 +301,5 @@ function orderquery($db){
             $row['pm_date'], $ret_name, $row['ret_circs'],  $row['get_photo'], $get_name );
     }
     echo "</table>";
+    process_page(1, ($totoal/$nums)+1, "orderquery");
 }

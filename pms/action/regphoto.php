@@ -26,7 +26,7 @@ function sel_photo_custinfo($db){
         $button='<button onClick="tableInsertClick('."'photography',4,".$row[custid]. ');">登记拍摄</button>';
         $sex=($row['baby_sex']=="1") ? "男" : "女";
 
-        echo table_body( $row[custid], $row[bookid], $row[order_no], $row[baby_name], $sex, $row[nick_name], 
+        echo table_body( $row[custid], $row[bookid], $row[order_no], $row[baby_name], $sex, $row[nick_name],
 	     $row['suit'], $row[cust_name], $row[cust_phone], $row[baby_birth], $button);
     }
     echo "</table>";
@@ -41,6 +41,7 @@ function sel_photography($db){
     $sql="select a.* ,b.* from p_photography a
        left join p_custom b
         on a.custid = b.custid ";
+
     $sql .= "order by a.photoid desc";
 
     //echo $sql;

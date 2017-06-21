@@ -165,19 +165,9 @@ function public_select($db, $table1){
     } else if($name!=""){
         $sql .= " where baby_name like '%$name%' ";
     }
+    $sql .= ' order by '.$k.' desc';
+// echo "<p>".$sql."</p>";
 
-    $totoal=$db->num_rows($sql);
-
-    $sql .= ' order by '.$k.' desc ';
-
-    $page=$_REQUEST[page];
-    if (empty($page)) {
-        $page=1;
-    }
-    $nums = 10;
-    $bgnpageno=($page - 1)*$nums;
-    $sql .= " limit $bgnpageno, $nums ";
-    // echo "<p>".$sql.",$totoal</p>";
     //处理表头
     echo get_table_style();
     echo "<tr>";
@@ -203,23 +193,18 @@ function public_select($db, $table1){
         echo '</tr>';
     }
     echo "</table>";
-    process_page(1, ($totoal/$nums)+1, "select_".$table1);
+    process_page(1, 10);
     return true;
 }
 
-function process_page($bgn, $endpage, $id) {
-    $str="<ul id='page' class=". 'pagination' .">\n";
-    // if($bgn==1) {
-    //     $str.="<li><a href='javascript:void(0);'>&laquo;</a></li>\n";
-    // } else {
-        // $str.="<li><a href='javascript:void(0);' onclick=PrevPage(". $bgn. ");>&laquo;</a></li>\n";
-    // }
-    $str.="<li><a href='javascript:void(0);'>页码:</a></li>\n";
-    for($bgn; $bgn<$endpage; $bgn++) {
-        $str.="<li><a href='javascript:void(0);' onclick=ClickPage('" .$id. "'," .$bgn. ");>".$bgn."</a></li>\n";
+function process_page($bgn, $count) {
+    $str="<ul class=". 'pagination' .">\n";
+    $end=$count + $bgn;
+    $str.="<li><a href='javascript:void(0);'>&laquo;</a></li>\n";
+    for($bgn;$bgn<$end;$bgn++) {
+        $str.="<li><a href='javascript:void(0);'>".$bgn."</a></li>\n";
     }
-    // $str.="<li><a href='javascript:void(0);'>&raquo;</a></li></ul>";
-    $str.="</ul>";
+    $str.="<li><a href='javascript:void(0);'>&raquo;</a></li></ul>";
     echo $str;
 }
 

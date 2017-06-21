@@ -551,6 +551,15 @@ var add_the_handlers = function(nodes) {
 	  if(document.getElementById("ajaxret")) {
               document.getElementById("ajaxret").innerHTML="欢迎光临泡泡糖儿童摄影";
 	  }
+      } else if (element.id==="login") {
+          if (typeof(Storage) !== "undefined") {
+	      localStorage.setItem("username", document.getElementById("user_phone").value);
+	  }
+
+      } else if(element.id==="logout") {
+          if (typeof(Storage) !== "undefined") {
+	      localStorage.setItem("username", "");
+	  }
       }
       var ret=pubSubmit("action/pubinterface.php", element.id, "POST", "ajaxret");
     }
@@ -647,12 +656,6 @@ var getSelectInfo=function(element, str, id){
   element.onchange=onchange(str, id);
 };
 
-var todayWarn=function(element, str, id){
-  var onchange=function(str, id){
-    ajaxCommit("action/select.php", "GET", str, id);
-  }
-  element.onchange=onchange(str, id);
-}
 /*取得后台列表框事件*/
 if(document.getElementById("getchnlinfo")){
   getSelectInfo(document.getElementById("getchnlinfo"), "oper=chnl&value=''", "chnlret");
@@ -671,7 +674,17 @@ if(document.getElementById("getgetmethod")){
   getSelectInfo(document.getElementById("getgetmethod"), "oper=method&name=get_method&value=''", "get_methodret");
 }
 if(document.getElementById("todaywarn")){
-  todayWarn(document.getElementById("todaywarn"), "oper=todaywarn&value=''", "dynamic_content");
+  getSelectInfo(document.getElementById("todaywarn"), "oper=todaywarn&value=''", "dynamic_content");
+}
+
+if(document.getElementById("navbar-menu")){
+  //使用局部缓存
+  if(typeof(Storage) !== "undefined") {
+    document.getElementById("username").innerHTML=localStorage.getItem("username");
+  } else {
+    getSelectInfo(document.getElementById("navbar-menu"), "oper=get_username&value=''", "username");
+  }
+
 }
 
 
@@ -682,7 +695,7 @@ var inputFocus=function() {
      inputs[0].focus();
      inputs[i].onfocus=function(){
         if(this.type=="text" && this.value!=this.defaultValue ) {
-	   this.value=""; 
+	   this.value="";
 	}
      }
      inputs.onblur=function(){
@@ -693,5 +706,15 @@ var inputFocus=function() {
 
   }
 }
-inputFocus();
+// inputFocus();
+var PrevPage=function(pageno){
+   console.log(pageno);
+};
 
+
+var ClickPage=function(id, pageno){
+  console.log('id:' + id + ' ,page:' + pageno);
+  var data="id=" + id;
+  data += "&page=" + pageno;
+  ajaxCommit("action/pubinterface.php", "POST", data, "ajaxret");
+};

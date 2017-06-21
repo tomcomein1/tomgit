@@ -7,6 +7,10 @@ product_select();
 function product_select(){
 /*打开数据库连接*/
     $db=open_database();
+    if (mysqli_connect_errno()) {
+       echo "您的数据库未开启，请联系管理员!";
+       return false;
+    }
 
     $oper=$_GET["oper"];
     if($oper=="chnl"){
@@ -17,6 +21,8 @@ function product_select(){
         method_select($db);
     } else if($oper=="todaywarn"){
         todaywarn_select($db);
+    } else if($oper=="get_username") {
+      get_username();
     }else{
         echo "无效的操作符!";
     }
@@ -128,3 +134,9 @@ function get_days_info($db, $bgndate, $enddate){
     }
     echo "</p>";
 }
+
+function  get_username() {
+   session_start();
+   echo $_SESSION['user'];
+}
+

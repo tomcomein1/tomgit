@@ -7,7 +7,7 @@
 body{
   /*background-color:#ccf; */
   /* background-color:#ccc; */
-  background-image: url(../images/background.jpg); 
+  background-image: url(../images/background.jpg);
   background-position: top left;
   background-repeat: repeat;
 }
@@ -17,10 +17,10 @@ body h1,h2 {
 }
 
 dt{
-    margin-right: auto auto;
+    margin-right: auto;
 }
 dd{
-    margin-right: auto auto;
+    margin-right: auto;
 }
 
 th{
@@ -33,6 +33,7 @@ tr{
     font-size:12px;
     background-color: #fff;
 }
+
 tr.odd td{
     color:#223;
     background-color: #ec8;
@@ -84,16 +85,16 @@ label.lm_width{
     width:120px;
     font-size: 14px;
 }
-fieldset { 
-    padding:10px; 
-    margin:10px; 
-    width:auto; 
-    color:#333; 
+fieldset {
+    padding:10px;
+    margin:10px;
+    width:auto;
+    color:#333;
     border:#06c dashed 1px;
     background-color:transparent;
 }
 legend {color:#06c; font-size:14px; font-weight:400px; background:#fff;}
 .inputtrans {
-    background-color:transparent; 
+    background-color:transparent;
 }
 
