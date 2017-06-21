@@ -7,7 +7,16 @@ function sel_cust_info($db){
     if ($baby_name!=""){
         $sql .= "where baby_name like '%$baby_name%' ";
     }
+    
+    $totoal=$db->num_rows($sql);
     $sql.="order by custid desc";
+    $page=$_REQUEST[page];
+    if (empty($page)) {
+        $page=1;
+    }
+    $nums = 10;
+    $bgnpageno=($page - 1)*$nums;
+    $sql .= " limit $bgnpageno, $nums ";
 //echo $sql;
 
     echo get_table_style();
@@ -24,6 +33,7 @@ function sel_cust_info($db){
         $row['mb_no'], $row['memo'], $button);
     }
     echo "</table>";
+    process_page(1, ($totoal/$nums)+1, "sel_cust_info");
     return true;
 }
 
@@ -33,7 +43,15 @@ function sel_booking($db){
           left join p_custom b
 	         on a.custid=b.custid ";
 
+    $totoal=$db->num_rows($sql);
     $sql.="order by bookid desc";
+    $page=$_REQUEST[page];
+    if (empty($page)) {
+        $page=1;
+    }
+    $nums = 10;
+    $bgnpageno=($page - 1)*$nums;
+    $sql .= " limit $bgnpageno, $nums ";
 //echo $sql;
 
     echo get_table_style();
@@ -52,5 +70,6 @@ function sel_booking($db){
              $row['cust_phone'], $button, $butt_del);
     }
     echo "</table>";
+    process_page(1, ($totoal/$nums)+1, "sel_booking");
     return true;
 }

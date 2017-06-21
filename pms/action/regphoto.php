@@ -14,7 +14,16 @@ function sel_photo_custinfo($db){
     if ($baby_name!="") {
         $sql .=" and baby_name like '%$baby_name%' ";
     }
+    
+    $totoal=$db->num_rows($sql);
     $sql .= "order by a.bookid desc";
+    $page=$_REQUEST[page];
+    if (empty($page)) {
+        $page=1;
+    }
+    $nums = 10;
+    $bgnpageno=($page - 1)*$nums;
+    $sql .= " limit $bgnpageno, $nums ";
 
     //echo $sql;
     echo get_table_style();
@@ -30,6 +39,7 @@ function sel_photo_custinfo($db){
 	     $row['suit'], $row[cust_name], $row[cust_phone], $row[baby_birth], $button);
     }
     echo "</table>";
+    process_page(1, ($totoal/$nums)+1, "sel_photo_custinfo");
     return true;
 }
 
@@ -42,7 +52,15 @@ function sel_photography($db){
        left join p_custom b
         on a.custid = b.custid ";
 
+    $totoal=$db->num_rows($sql);
     $sql .= "order by a.photoid desc";
+    $page=$_REQUEST[page];
+    if (empty($page)) {
+        $page=1;
+    }
+    $nums = 10;
+    $bgnpageno=($page - 1)*$nums;
+    $sql .= " limit $bgnpageno, $nums ";
 
     //echo $sql;
     echo get_table_style();
@@ -61,5 +79,6 @@ function sel_photography($db){
         $button, $butt_del);
     }
     echo "</table>";
+    process_page(1, ($totoal/$nums)+1, "sel_photography");
     return true;
 }
