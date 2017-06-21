@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset='utf-8'>
+<title>简单表单示例</title>
+<style type="text/css">
+    label{
+    display:inline-block;
+    width:90px;
+    height: 30px;
+    font-size: 14px;
+}
+</style>
+</head>
+<form name='form1'>
+    <label for=part>PART</label>
+     <input pattern="[0-9][A-Z]{3}" name=part placeholder='输入内容:一个数字与三个大写字母' /><br/>
+    <label for=username>姓名</label>
+    <input name=username id=username type='text' required autofocus /><br/>
+    <label for=age>年龄</label>
+    <input name=age id=age type='number' min=0 max=130 /><br/>
+    <label for=birthday>出生日期</label>
+    <input name=birthday id=birthday type='date' /><br/>
+    <label for=email>Email</label>
+    <input name=email id=email type='email' required /><br/>
+    <label for=url>个人主页</label>
+    <input name=url id=url type='url' /><br/>
+    <label for=memo>个人简介</label>
+    <textarea name=memo id='memo' required ></textarea><br/>
+
+    <input type=submit>
+</form>
+

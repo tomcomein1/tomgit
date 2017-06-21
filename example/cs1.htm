@@ -1,0 +1,39 @@
+<head>
+<meta charset='utf-8'>
+<style type='text/css'>
+[id=image-boarder]{
+    margin:3px;
+    width:450px;
+    height:104px;
+    padding-left:14px;
+    padding-top:20px;
+    background:url(test.png);
+    background-color:yellow;
+    background-repeat:no-repeat;
+}
+a[href$=\/]:after, a[href$=htm]:after,a[href$=html]:after{
+    content: "Web网页";
+    color: red;
+}
+a[href$=png]:after{
+    content:"png图像文件";
+    color:green;
+}
+:root{background-color: yellow;}
+body *:not(h1){background-color: limegreen;}
+</style>
+</head>
+<body>
+<h1>CSS3示例</h1>
+<div id='image-boarder'>
+示例文字1<br/>
+示例文字2<br/>
+示例文字3<br/>
+示例文字4<br/>
+</div>
+<ul>
+<li><a href="http://www.baidu.com/">HTML 5+CSS 3权威指南</a>
+<li><a href="example.com/laside.htm">CSS 3的新特性</a>
+<li><a href="input.png">图像素材</a>
+</ul>
+</body>

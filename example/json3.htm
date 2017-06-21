@@ -1,0 +1,54 @@
+<head>
+    <meta charset='utf-8'>
+    <style type="text/css">
+        table {
+            border-collapse: collapse;
+        }
+        table td {
+            text-align: center;
+            border: 1px solid gray;
+            padding: 3px 10px;
+        }
+    </style>
+    <script src='./boilerplate/dist/js/vendor/jquery-3.2.0.min.js'></script>
+</head>
+<body>
+    <div>点击按钮获取JSON数据</div>
+    <input type="button" id="button" value="确定" />
+    <div id="result"></div>
+    <script>
+    /*$(document).ready(function(){
+            $('#button').click(function(){
+                $.getJSON('data.ashx', function(data){
+                    var music="<ul>";
+                    $.each(data,function(i,n){
+                        music+="<li>"+n["optionValue"]+"</li>";
+                    });
+                    music+="</ul>";
+                    $('#result').append(music);
+                });
+                return false;
+            });
+});*/
+$(document).ready(function(){
+    $('#button').click(function(){
+        $.ajax({
+            type:"GET",
+            url:"data.ashx",
+            dataType:"json",
+            success:function(data){
+                var music="<ul>";
+                //i表示在data中的索引位置，n表示包含的信息的对象
+                $.each(data,function(i,n){
+                //获取对象中属性为optionsValue的值
+                music+="<li>"+n["optionValue"]+"</li>";
+                });
+                music+="</ul>";
+                $('#result').append(music);
+            }
+        });
+        return false;
+    });
+});
+</script>
+</body>

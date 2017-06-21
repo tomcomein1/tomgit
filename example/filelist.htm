@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<head>
+<meta charset='utf-8'>
+<title>FileList与file示例</title>
+</head>
+<script language=javascript>
+function ShowFileName(){
+    var file;
+    for(var i=0; i<document.getElementById("file").files.length; i++){
+        file=document.getElementById("file").files[i];
+        alert(file.name);
+    }
+}
+function ShowFileType(){
+    var file;
+    file=document.getElementById("file").files[0];
+    var size=document.getElementById("size");
+    size.innerHTML=file.size;
+    var type=document.getElementById('type');
+    type.innerHTML=file.type;
+}
+</script>
+<input type="file" id="file" multiple size = "80"/>
+<!-- <input type="button" onclick="ShowFileName();" value='文件上传' /> -->
+<input type="button" onclick="ShowFileType();" value='文件类型' /><br/>
+文件字节长度:<span id='size'></span><br/>
+文件类型:<span id='type'></span>
