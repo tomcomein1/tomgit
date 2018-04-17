@@ -1,0 +1,12 @@
+##  错误信息描述 
+IBPS|1|系统错
+IBPS|2|其它错识破
+IBPS|3|pppfafad
+## 网银
+700|1|error1j
+700|2|error2j
+700|3|error3
+700|4|error4
+700|5|error5
+700|6|error6
+700|7|error7

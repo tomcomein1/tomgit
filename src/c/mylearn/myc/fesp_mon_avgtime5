@@ -1,0 +1,117 @@
+fespmon@IPSSAP03:/home/ap/fespmon/ccmsjob> cat fesp_mon_avgtime5 
+export PATH=$PATH:$HOME/ccmsjob
+Etime=` date +"%H:%M:%S"`
+Ehour=` date +"%H"`
+Eminute=` date +"%M"`
+Esecond=` date +"%S"`
+Sminute=` echo $Eminute - 5 | bc -l `
+#Stime=08:30:00
+Stime=$Ehour:$Sminute:$Esecond
+ZJ=`hostname`
+SJ1=`date +"%H%M%S"`
+SJ=`date +"%H:%M:%S"`
+Y4=`date +%Y`
+MM=`date +%m`
+DD=`date +%d`
+
+TIME=$Y4$MM$DD$SJ1
+FILE=$HOME/ccmsjob/data/fesp\_$ZJ\_avgtime5\_$TIME
+NAME=fesp\_$ZJ\_avgtime5\_$TIME
+echo $FILE
+echo "FESP|$ZJ|avgtime5|$Y4$MM$DD|$SJ|" >$FILE
+
+##*****************************************************************##
+# 功能: 将$HOME/log/EAIAdapter.log 中CKJ-TJ数据中相应的交易码,
+#         交易起始时间,结束时间 处理成|线分割的指定格式
+#
+# 说明：|服务器名|交易码|交易平均时间|
+#
+# shell编写时间: [ 2009-02-05 ]
+#
+##*****************************************************************##
+
+echo "=====  Start trade_time.sh ===== " 
+Date=` date -u +'%Y%m%d' `
+echo " 日期: $Date "
+TradeNo=""
+#Etime=`date +%T `
+echo $Stime - $Etime
+#--------配置类,可修改-------------------------#
+SourceName=/home/ap/fespmon/log/EAIAdapter.log
+echo " 源文件: $SourceName "
+TempFile=/home/ap/fespmon/ccmsjob/data/E_tradetime.log.${Date}
+MidFile=/home/ap/fespmon/ccmsjob/data/${ZJ}.CKJ05.txt
+echo " 临时文件: $TempFile "
+#--------------------------------------------#
+#NowDate=` date -u +'%Y%m%d%H0000' `
+NowDate=$Date
+#DestFile=fesp_${ZJ}_${NowDate}
+#echo " 目标文件: $DestFile "
+## 前处理,将CKJ-TJ数据处理到临时文件中 ##
+grep "CKJ-TJ" $SourceName |awk -F"|" '{print $5, $2, $3, $4, $8, $6}' > $TempFile
+HM=`echo $Stime | cut -f1-2 -d":" `
+echo 取小时分钟: $HM
+StartLine=`grep -n " $HM:[0-9]*:[0-9]* " $TempFile | head -1 | awk -F":" '{ print $1 }'` 
+echo 开始行: $StartLine
+if [ "X$StartLine" = "X" ]; then
+  StartLine=1
+fi
+echo 开始行: $StartLine
+
+## 取对应数据 ##
+sed -n "$StartLine,$ p" $TempFile | sort -k1,1 > $MidFile
+echo $MidFile
+#> $DestFile 
+iLine=0
+FirstTrade=""
+while read line
+do
+TradeNo=`echo $line | awk '{ print $1 }' `
+SMillSecond=`echo $line | awk '{ print $2 }' | cut -f4 -d":" `
+EMillSecond=`echo $line | awk '{ print $3 }' | cut -f4 -d":" `
+SSec=`echo $line | cut -f3 -d":" `
+ESec=`echo $line | cut -f6 -d":" `
+
+SMinute=`echo $line | awk '{ print $2 }' | cut -f2 -d":" `
+EMinute=`echo $line | awk '{ print $3 }' | cut -f2 -d":" `
+
+Shour=`echo $line | awk '{ print $2 }' | cut -f1 -d":" `
+Ehour=`echo $line | awk '{ print $3 }' | cut -f1 -d":" `
+
+Second=`echo ${ESec} - ${SSec} | bc -l `
+Minute=`echo ${EMinute} - ${SMinute} | bc -l ` 
+Hour=`echo ${Ehour} - ${Shour} | bc -l `
+
+MillS=`echo \( ${Hour} \* 60 \* 60 \+ ${Minute} \* 60 + ${Second} \) \* 1000000 + ${EMillSecond} - ${SMillSecond} | bc -l `
+if [ "X${FirstTrade}" != "X${TradeNo}" ]; then
+  iLine=`expr $iLine + 1`
+  NAMEs[iLine]=$TradeNo
+  MILLs[iLine]=$MillS
+  NUMs[iLine]=1
+  FirstTrade=$TradeNo
+else
+  MILLs[iLine]=`echo ${MILLs[iLine]} + ${MillS} | bc -l `
+  NUMs[iLine]=`echo ${NUMs[iLine]} + 1 | bc -l ` 
+fi
+done < ${MidFile}
+i=1
+SumEQ=0
+while [ ${i} -le ${iLine} ]
+do
+##求平均响应时间 ms ###
+EQs[i]=`echo ${MILLs[i]} / ${NUMs[i]} / 1000 | bc -l | cut -d"." -f1 `
+##EQs[i]=`echo ${MILLs[i]} / ${NUMs[i]} | bc -l | cut -d"." -f1 `
+SumEQ=`echo ${SumEQ} + ${EQs[i]} | bc -l `
+#echo "|1|${NAMEs[i]}|${EQs[i]}|"
+echo "${NAMEs[i]}|${EQs[i]}|${NUMs[i]}" >>$FILE
+# ${MILLs[i]}|${NUMs[i]} 
+i=`expr $i + 1`
+done
+TotEqtime=`echo ${SumEQ} / ${iLine} | bc -l | cut -d"." -f1`
+echo "all000|${TotEqtime}|${iLine}" >>$FILE
+#echo "=====  End trade_time.sh ===== " 
+echo "#">>$FILE
+
+#调用文件发送命令
+/home/ap/fespmon/ccmsjob/dptf_file.sh $NAME
+
