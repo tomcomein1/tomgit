@@ -6,7 +6,6 @@ import java.util.Properties;
 
 public class SingleProper {
 	private static final SingleProper instance = new SingleProper();
-	private String filename = null;
 
 	private SingleProper() {
 	}
@@ -15,14 +14,10 @@ public class SingleProper {
 		return SingleProper.instance;
 	}
 
-	public void setFilename(String filename) {
-		this.filename = filename;
-	}
-
-	public String ReadIni(String name) {
+	public String ReadIni(String fileName, String name) {
 		String value = null;
 		try {
-			FileInputStream reader = new FileInputStream(filename);
+			FileInputStream reader = new FileInputStream(fileName);
 			Properties pro = new Properties();
 			pro.load(reader);
 			value = pro.getProperty(name);
@@ -36,18 +31,11 @@ public class SingleProper {
 		return value;
 	}
 
-	public String ReadIni(String fileName, String name) {
-		this.filename = fileName;
-		return ReadIni(name);
-	}
-
 	public static void main(String[] args) {
 		SingleProper sp = SingleProper.getInstance();
-		sp.setFilename("E:\\test.ini");
-		String item1 = sp.ReadIni("TOM");
+		String item1 = sp.ReadIni("E:\\test.ini", "TOM");
 		System.out.println(item1);
-		String item2 = sp.ReadIni("MaxNumber");
+		String item2 = sp.ReadIni("E:\\test.ini", "MaxNumber");
 		System.out.println(item2);
 	}
 }
-
