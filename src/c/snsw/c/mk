@@ -1,0 +1,1 @@
+cc -brtl -q64 -qcpluscmt -o $1 $1.c
