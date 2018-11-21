@@ -4,6 +4,9 @@
 
 #define MAX_LINE_LEN 2048
 #define ARRAY_SIZE( ARRAY ) (sizeof (ARRAY) / sizeof (ARRAY[0]))
+
+typedef int (*FP)(void*);    /*结构体表示函数指针 */
+
 char *rtrim(char *str);
 void HexDump(char *buf,int len,int addr);
 
@@ -65,7 +68,18 @@ char *rtrim(char *str)
     return str;
 }
 
-int read_file_process(const char *filename) {
+/**callback function**/
+int process(void *s){
+   struct str_errfile *e=(struct str_errfile *)s;
+
+   /* HexDump((char *)s, sizeof(struct str_errfile), (int)s); */
+   printf("%s|%10.2f|%s|%10.2f|%10.2f|%s|%s|%s|%s|%s|%s|%s|||\n", 
+       e->fd6, atof(e->fd7)/100, e->fd31, atof(e->fd20)/100, atof(e->fd21)/100, 
+       e->fd8, e->fd9, e->fd10, rtrim(e->fd2), e->fd11, e->fd4, e->fd26); 
+   return 0;
+}
+
+int read_file_process(const char *filename, FP callfunc) {
 	FILE *fp=NULL;
 	char line[MAX_LINE_LEN];
 	const int units[]={
@@ -89,11 +103,13 @@ int read_file_process(const char *filename) {
 			/* printf("[%s]", line); */
 			memset(&err, 0, sizeof(err));
 			get_clear_file_str(line, units, ARRAY_SIZE(units), (void *) &err);
-			printf("%s|%10.2f|%s|%10.2f|%10.2f|%s|%s|%s|%s|%s|%s|%s|||\n", 
-			err.fd6, atof(err.fd7)/100, err.fd31, atof(err.fd20)/100, atof(err.fd21)/100, 
-			err.fd8, err.fd9, err.fd10, rtrim(err.fd2), err.fd11, err.fd4, err.fd26);
 
-			/* HexDump((char *)&err, sizeof(err), sizeof(int)); */
+			/*printf("%s|%10.2f|%s|%10.2f|%10.2f|%s|%s|%s|%s|%s|%s|%s|||\n", 
+				err.fd6, atof(err.fd7)/100, err.fd31, atof(err.fd20)/100, atof(err.fd21)/100, 
+				err.fd8, err.fd9, err.fd10, rtrim(err.fd2), err.fd11, err.fd4, err.fd26); 
+			*/
+
+			callfunc((void*)&err);
 		}
 	}
 	return 0;
@@ -116,7 +132,7 @@ int get_clear_file_str(const char *line, const int units[], int usize, void *des
 
 int main(int argc, char *argv[])
 {
-	read_file_process(argv[1]);
+	read_file_process(argv[1], process);
 }
 
 void HexDump(char *buf,int len,int addr) {
