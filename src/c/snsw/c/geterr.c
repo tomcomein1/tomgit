@@ -68,26 +68,31 @@ char *rtrim(char *str)
     return str;
 }
 
-/**callback function**/
-int process(void *s){
-   struct str_errfile *e=(struct str_errfile *)s;
+/**callback function, must modify this function **/
+int process_errfile(void *s){
+   const int units[]={
+		3,11,11,6,10, 19,12,4,6,4,
+		8,12,2,6,11, 11,6,2,3,12,
+		12,12,12,12,12, 4,11,19,11,19,
+		10,3,1,1,4, 12,1,2 };
+   struct str_errfile err;
 
-   /* HexDump((char *)s, sizeof(struct str_errfile), (int)s); */
+   /* printf("acct no|tran amt|old tran time|fee1|fee2|message type|txcode_fd3|fd18|brch_fd32|tmno_fd41|transysno_fd11|errmsg|\n"); */
+   /** msgtype=0220 && txcode=200000 && errmsg=9707 th **/
+   memset(&err, 0, sizeof(err));
+   get_clear_file_str((char *)s, units, ARRAY_SIZE(units), (void *) &err);
+
    printf("%s|%10.2f|%s|%10.2f|%10.2f|%s|%s|%s|%s|%s|%s|%s|||\n", 
-       e->fd6, atof(e->fd7)/100, e->fd31, atof(e->fd20)/100, atof(e->fd21)/100, 
-       e->fd8, e->fd9, e->fd10, rtrim(e->fd2), e->fd11, e->fd4, e->fd26); 
+	err.fd6, atof(err.fd7)/100, err.fd31, atof(err.fd20)/100, atof(err.fd21)/100, 
+	err.fd8, err.fd9, err.fd10, rtrim(err.fd2), err.fd11, err.fd4, err.fd26); 
+
+   /* HexDump((char *)&err, sizeof(struct str_errfile), (int)&err); */
    return 0;
 }
 
 int read_file_process(const char *filename, FP callfunc) {
 	FILE *fp=NULL;
 	char line[MAX_LINE_LEN];
-	const int units[]={
-		3,11,11,6,10, 19,12,4,6,4,
-		8,12,2,6,11, 11,6,2,3,12,
-		12,12,12,12,12, 4,11,19,11,19,
-		10,3,1,1,4, 12,1,2 };
-	struct str_errfile err;
         int i=0;
 
 	if( !(fp = fopen(filename, "r"))) {
@@ -95,21 +100,11 @@ int read_file_process(const char *filename, FP callfunc) {
 		return -1;
 	}
 
-	/* printf("acct no|tran amt|old tran time|fee1|fee2|message type|txcode_fd3|fd18|brch_fd32|tmno_fd41|transysno_fd11|errmsg|\n"); */
-	/** msgtype=0220 && txcode=200000 && errmsg=9707 th **/
 	while(!feof(fp)) {
 		memset(line, 0, sizeof(line));
 		if(fgets(line, MAX_LINE_LEN, fp)) {
 			/* printf("[%s]", line); */
-			memset(&err, 0, sizeof(err));
-			get_clear_file_str(line, units, ARRAY_SIZE(units), (void *) &err);
-
-			/*printf("%s|%10.2f|%s|%10.2f|%10.2f|%s|%s|%s|%s|%s|%s|%s|||\n", 
-				err.fd6, atof(err.fd7)/100, err.fd31, atof(err.fd20)/100, atof(err.fd21)/100, 
-				err.fd8, err.fd9, err.fd10, rtrim(err.fd2), err.fd11, err.fd4, err.fd26); 
-			*/
-
-			callfunc((void*)&err);
+			callfunc((void*)line);
 		}
 	}
 	return 0;
@@ -132,7 +127,7 @@ int get_clear_file_str(const char *line, const int units[], int usize, void *des
 
 int main(int argc, char *argv[])
 {
-	read_file_process(argv[1], process);
+	read_file_process(argv[1], process_errfile);
 }
 
 void HexDump(char *buf,int len,int addr) {
