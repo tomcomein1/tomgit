@@ -42,11 +42,12 @@ char *rtrim(char *str)
 }
 
 /*打印字符数组的长度*/
-int show_char_struct(const int units[], int array_len, char *src)
+int show_char_struct(const int units[], int array_len, char *src, int sep)
 {
 	char tmp[129];
 	int i=0;
-
+	
+	sep=(sep==0) ? '|' : sep;
 	for(i=0;i<array_len;i++){
 		memset(tmp, 0, sizeof(tmp));
 		memcpy(tmp, src, units[i]);
@@ -55,13 +56,13 @@ int show_char_struct(const int units[], int array_len, char *src)
 		#ifdef TEST
 		printf("f%d[%d]:[%s]\n", i+1, strlen(tmp), tmp);
 		#endif
-		printf("%s|", tmp);
+		printf("%s%c", tmp, sep);
 	}
 	printf("\n");
 	return 0;
 }
 
-int read_file_process_new(const char *filename, const int units[], const int array_len) {
+int read_file_process_new(const char *filename, const int units[], const int array_len, int sep) {
 	FILE *fp=NULL;
 	char line[MAX_LINE_LEN];
 
@@ -74,43 +75,27 @@ int read_file_process_new(const char *filename, const int units[], const int arr
 		memset(line, 0, sizeof(line));
 		if(fgets(line, MAX_LINE_LEN, fp)) {
 			/* printf("[%s]", line); */
-			show_char_struct(units, array_len, line);
+			show_char_struct(units, array_len, line, sep);
 		}
 	}
 	return 0;
 }
 
-/**解文件行 结构必需是字符串且按units中定义大小顺序**/
-int get_clear_file_str(const char *line, const int units[], int usize, void *dest)
-{
-	char *p=dest;
-	int i=0,l=0;
-
-	if(line==NULL || line[0]=='\0') return -1;
-
-	for(;i<usize; i++) {
-		memcpy(p, line+l, units[i]);
-		p=p+units[i]+1;
-		*p = '\0';
-		l=l+units[i]+1;
-	}
-	return 0;
-}
 int help(const char *argv){
 	return printf("\t%s <-e|-t|-c> <filename>\n", argv);
 }
 
 int main(int argc, char *argv[])
 {
-	if(argc==3) {
+	if(argc>=3) {
 		strcpy(_StaticFileName, argv[2]);
-		printf("file:%s\n", _StaticFileName);
+		/* printf("file:%s\n", _StaticFileName); */
 		if(memcmp(argv[1], "-e", 2)==0) {
-			read_file_process_new(argv[2], err_units, ARRAY_SIZE(err_units));
+			read_file_process_new(argv[2], err_units, ARRAY_SIZE(err_units), argv[3][0] );
 		} else if(memcmp(argv[1], "-t", 2)==0){
-			read_file_process_new(argv[2], tfl_units, ARRAY_SIZE(tfl_units));
+			read_file_process_new(argv[2], tfl_units, ARRAY_SIZE(tfl_units), argv[3][0]);
 		} else if (memcmp(argv[1], "-c", 2)==0){
-			read_file_process_new(argv[2], com_units, ARRAY_SIZE(com_units));
+			read_file_process_new(argv[2], com_units, ARRAY_SIZE(com_units), argv[3][0]);
 		} else {
 			help(argv[0]);
 		}
