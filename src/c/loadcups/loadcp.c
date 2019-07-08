@@ -4,6 +4,7 @@
 
 #define MAX_LINE_LEN 2048
 #define ARRAY_SIZE( ARRAY ) (sizeof (ARRAY) / sizeof (ARRAY[0]))
+char *ltrim(char * str);
 char *rtrim(char *str);
 
 const int err_units[]={
@@ -24,6 +25,38 @@ const int tfl_units[]={
 	11, 1, 1, 19, 2, 1, 15};
 
 static char _StaticFileName[129]="\0";
+
+char *get_filename(char *path, char *name)
+{
+	char *p=NULL;
+	char *q=path;
+	while( (p=strstr(q, "/")) != NULL) {
+		p++; 
+		q=p;
+	}
+
+	strcpy(name, q);
+	return q;
+}
+
+/*É¾³ý×ó¿Õ¸ñ*/
+char *ltrim(char * str)
+{
+    char * psource;
+    char *pdest;
+
+    psource = pdest = str;
+
+    while (*psource == ' ' || *psource == '\t' ) psource++;
+
+    if (psource != pdest)
+    {
+        while (*psource && psource) *pdest++ = *psource++;
+        *pdest = '\0';
+    }
+
+    return str;
+}
 /* É¾³ýÓÒ¿Õ¸ñ */
 char *rtrim(char *str)
 {
@@ -51,14 +84,14 @@ int show_char_struct(const int units[], int array_len, char *src, int sep)
 	for(i=0;i<array_len;i++){
 		memset(tmp, 0, sizeof(tmp));
 		memcpy(tmp, src, units[i]);
-		rtrim(tmp);
+		ltrim(rtrim(tmp));
 		src=src+units[i]+1;
 		#ifdef TEST
 		printf("f%d[%d]:[%s]\n", i+1, strlen(tmp), tmp);
 		#endif
 		printf("%s%c", tmp, sep);
 	}
-	printf("\n");
+	printf("%s|\n", get_filename(_StaticFileName, tmp));
 	return 0;
 }
 
